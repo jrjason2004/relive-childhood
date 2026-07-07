@@ -302,9 +302,20 @@ async function fileExists(p: string): Promise<boolean> {
   }
 }
 
+// Prefer the bundled static binary (present on Vercel, where there is no
+// system ffmpeg); fall back to a PATH ffmpeg locally if the package is absent.
+const FFMPEG_BIN: string = (() => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return (require("ffmpeg-static") as string) || "ffmpeg";
+  } catch {
+    return "ffmpeg";
+  }
+})();
+
 function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const proc = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    const proc = spawn(FFMPEG_BIN, args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     proc.stderr.on("data", (d) => (stderr += d.toString()));
     proc.on("error", reject);
