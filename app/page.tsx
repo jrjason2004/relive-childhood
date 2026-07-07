@@ -11,7 +11,7 @@
 // (the calendar show + rotating personalized loading lines carry the whole
 // wait), then the film plays start-to-finish as one continuous piece: each
 // 2s scene hard-cuts to the next, no crossfades, no mid-film loops or waits.
-// A TikTok-style "POV: {city} in {year}" line sits on the film and is burned
+// A TikTok-style "POV: Growing up in {year} {city}." line sits on the film, burned
 // into the shareable mp4 (ffmpeg stitch: clips + hard cuts + music + POV
 // text), offered via the share sheet after the first full pass. The film
 // screen itself never shows progress popups. Set NEXT_PUBLIC_USE_WAN=1 for
@@ -65,9 +65,9 @@ function renderPovPng(text: string): string {
     x.lineJoin = "round";
     x.lineWidth = 14;
     x.strokeStyle = "rgba(0,0,0,0.9)";
-    x.strokeText(text, 540, 80);
+    x.strokeText(text, 540, 80, 1020);
     x.fillStyle = "#fff";
-    x.fillText(text, 540, 80);
+    x.fillText(text, 540, 80, 1020);
     return c.toDataURL("image/png");
   } catch {
     return "";
@@ -139,6 +139,7 @@ export default function Home() {
   const tunnelRef = useRef<HTMLCanvasElement | null>(null);
   const warpSpeedRef = useRef(0); // eased travel progress, read by the tunnel rAF loop
   const curYearRef = useRef(new Date().getFullYear()); // year the rewind is passing
+  const povYearRef = useRef(0); // the childhood year the journey lands on
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const arrivalRef = useRef<{ from: number; t0: number; rampMs: number } | null>(null);
   const revealFiredRef = useRef(false);
@@ -512,7 +513,7 @@ export default function Home() {
       // after the clip lands), so the stitched mp4 is video-only too.
       const birthYear = new Date().getFullYear() - prof.ageYears;
       const povCity = cityName.split(",")[0].trim();
-      const povText = `POV: ${povCity.charAt(0).toUpperCase() + povCity.slice(1)} in ${birthYear + 7}`;
+      const povText = `POV: Growing up in ${birthYear + 7} ${povCity.charAt(0).toUpperCase() + povCity.slice(1)}.`;
       // Render the POV line to a transparent PNG for the stitch overlay —
       // canvas text matches the live overlay exactly, and the local ffmpeg
       // build has no drawtext filter.
@@ -751,12 +752,13 @@ export default function Home() {
   const cityValid = Boolean(cityTrim);
   const showMirror = screen === "scan" || screen === "city" || screen === "travel";
 
-  // TikTok-style overlay: "POV: Brambleton in 2007" — city as typed (before
-  // any comma), the childhood year the countdown lands on.
+  // TikTok-style overlay: "POV: Growing up in 2007 Brambleton." — city as
+  // typed (before any comma), the childhood year the countdown lands on.
   const povCityRaw = cityTrim.split(",")[0].trim();
   const povCity = povCityRaw ? povCityRaw.charAt(0).toUpperCase() + povCityRaw.slice(1) : "";
   const povYear = fromYear - yearsBack;
-  const povLine = povCity ? `POV: ${povCity} in ${povYear}` : "";
+  povYearRef.current = povYear; // tunnel polaroids never go past this year
+  const povLine = povCity ? `POV: Growing up in ${povYear} ${povCity}.` : "";
 
   // Personalized loading lines that rotate under the travel countdown while
   // the fleet films the first memories.
@@ -824,16 +826,21 @@ export default function Home() {
     }
 
     // Pick the not-recently-shown photo closest to the year the rewind is
-    // passing; jitter keeps the same two from strict alternation.
+    // passing; jitter keeps the same two from strict alternation. Only years
+    // on this user's actual journey qualify — nothing older than the
+    // childhood year the trip lands on, nothing newer than today.
     const used = new Set<number>();
     let lastSpawn = 0;
     function spawn() {
       if (manifest.length === 0) return;
+      const nowYear = new Date().getFullYear();
       let best = -1;
       let bestD = Infinity;
       for (let i = 0; i < manifest.length; i++) {
         if (used.has(i)) continue;
-        const d = Math.abs(manifest[i].y - curYearRef.current) + Math.random() * 2;
+        const y = manifest[i].y;
+        if (y < povYearRef.current || y > nowYear) continue;
+        const d = Math.abs(y - curYearRef.current) + Math.random() * 2;
         if (d < bestD) {
           bestD = d;
           best = i;
@@ -865,8 +872,8 @@ export default function Home() {
       const dt = Math.min(50, now - prev) / 1000;
       prev = now;
       ctx.clearRect(0, 0, w, h);
-      const speed = 230 + warpSpeedRef.current * 560; // z units/s toward camera
-      const interval = 430 - warpSpeedRef.current * 200; // spawn cadence
+      const speed = 120 + warpSpeedRef.current * 270; // z units/s toward camera — a slow drift
+      const interval = 520 - warpSpeedRef.current * 220; // spawn cadence
       if (now - lastSpawn > interval && sprites.length < 14) {
         spawn();
         lastSpawn = now;
