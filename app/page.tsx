@@ -115,7 +115,10 @@ export default function Home() {
     Array<{ idx: number; url: string; video?: string }>
   >([]);
   const [videoCount, setVideoCount] = useState(0); // finished Wan clips
-  const [flashMem, setFlashMem] = useState(""); // travel: brief memory-photo flash (url)
+  // travel: memories currently flying past (several concurrent for a fluid feel)
+  const [flyMems, setFlyMems] = useState<
+    Array<{ id: number; src: string; dx: number; dy: number }>
+  >([]);
   const [total, setTotal] = useState(0);
   const [cursor, setCursor] = useState(0);
   const [genDone, setGenDone] = useState(false);
@@ -140,6 +143,7 @@ export default function Home() {
   const warpSpeedRef = useRef(0); // eased travel progress, read by the tunnel rAF loop
   const curYearRef = useRef(new Date().getFullYear()); // year the rewind is passing
   const povYearRef = useRef(0); // the childhood year the journey lands on
+  const flyIdRef = useRef(0); // increments per flying memory
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const arrivalRef = useRef<{ from: number; t0: number; rampMs: number } | null>(null);
   const revealFiredRef = useRef(false);
@@ -724,7 +728,7 @@ export default function Home() {
     setLiveDone(false);
     setVideoUrl("");
     setVideoCount(0);
-    setFlashMem("");
+    setFlyMems([]);
     setShowShare(false);
     setToast("");
     beginScan(runRef.current);
@@ -743,6 +747,7 @@ export default function Home() {
   const targetTime = new Date(fromYear - yearsBack, 5, 15).getTime();
   const curDate = new Date(Date.now() - (Date.now() - targetTime) * eased);
   const curYear = curDate.getFullYear();
+  const curMonth = curDate.toLocaleDateString("en-US", { month: "long" }).toUpperCase();
   warpSpeedRef.current = eased; // the tunnel canvas reads this every frame
   curYearRef.current = curYear; // ...and matches polaroids to this year
   const cityTrim = city.trim();
@@ -806,23 +811,46 @@ export default function Home() {
     return () => cancelAnimationFrame(raf);
   }, [screen]);
 
-  // Flashes of memories: every few seconds a real photo from the year the
-  // rewind is passing appears for a moment and dissolves. One state update
-  // per flash (~every 3s), animated purely in CSS — nothing per-frame.
+  // Memories flying by: real photos from the years the rewind is passing
+  // fly outward past the camera, several overlapping at once so the flow
+  // feels continuous (like the warp lines) rather than one-at-a-time cards.
+  // Each is a plain CSS transform/opacity animation — cheap even several at
+  // once — and spawn cadence tightens as the rewind accelerates.
   useEffect(() => {
     if (screen !== "travel") return;
     let manifest: PolaroidEntry[] = [];
     const cache = new Map<string, HTMLImageElement>();
     const used = new Set<number>();
     let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // The image currently being waited on — kept stable across ticks so a
+    // slow-loading photo isn't abandoned for a new pick every tick (that was
+    // firing dozens of parallel fetches with almost none completing in time).
+    let pending: { idx: number; img: HTMLImageElement } | null = null;
     fetch("/polaroids/manifest.json")
       .then((r) => r.json())
       .then((m: PolaroidEntry[]) => {
-        if (alive) manifest = m;
+        if (!alive) return;
+        manifest = m;
+        // Warm a few years around the start of the journey so the first
+        // flights don't stall on a cold fetch.
+        m.filter((e) => Math.abs(e.y - curYearRef.current) <= 2).forEach((e) => {
+          const src = `/polaroids/${e.f}`;
+          if (!cache.has(src)) {
+            const im = new Image();
+            im.src = src;
+            cache.set(src, im);
+          }
+        });
       })
       .catch(() => {});
-    const tick = () => {
-      if (!alive || manifest.length === 0) return;
+
+    const schedule = () => {
+      if (!alive) return;
+      const delay = 1150 - warpSpeedRef.current * 750; // tightens as the rewind speeds up
+      timer = setTimeout(tick, Math.max(260, delay));
+    };
+    const pickNext = (): boolean => {
       // nearest not-recently-shown photo to the year being passed, bounded
       // to this user's journey (today back to their childhood year)
       const nowYear = new Date().getFullYear();
@@ -840,27 +868,38 @@ export default function Home() {
       }
       if (best === -1) {
         used.clear();
-        return;
+        return false;
       }
-      const e = manifest[best];
-      const src = `/polaroids/${e.f}`;
+      const src = `/polaroids/${manifest[best].f}`;
       let im = cache.get(src);
       if (!im) {
         im = new Image();
         im.src = src;
         cache.set(src, im);
       }
-      if (!(im.complete && im.naturalWidth > 0)) return; // flash it next tick
-      used.add(best);
-      setFlashMem(src);
+      pending = { idx: best, img: im };
+      return true;
     };
-    const first = setTimeout(tick, 1600);
-    const iv = setInterval(tick, 3200);
+    const tick = () => {
+      if (!alive || manifest.length === 0) return schedule();
+      if (!pending && !pickNext()) return schedule();
+      const p = pending!;
+      if (!(p.img.complete && p.img.naturalWidth > 0)) return schedule(); // keep waiting on the same image
+      used.add(p.idx);
+      if (used.size > manifest.length - 6) used.clear();
+      const a = Math.random() * Math.PI * 2;
+      setFlyMems((fm) => [
+        ...fm.slice(-3),
+        { id: flyIdRef.current++, src: p.img.src, dx: Math.cos(a), dy: Math.sin(a) * 0.65 },
+      ]);
+      pending = null;
+      schedule();
+    };
+    schedule();
     return () => {
       alive = false;
-      clearTimeout(first);
-      clearInterval(iv);
-      setFlashMem("");
+      if (timer) clearTimeout(timer);
+      setFlyMems([]);
     };
   }, [screen]);
 
@@ -1325,29 +1364,35 @@ export default function Home() {
               }}
             />
 
-            {/* a flash of memory: a real photo from the year being passed
-                appears for a moment and dissolves */}
-            {flashMem && (
-              /* eslint-disable-next-line @next/next/no-img-element */
+            {/* memories flying by: real photos of the years being passed fly
+                outward past the camera, several overlapping for a fluid,
+                continuous feel (like the warp lines, not discrete cards) */}
+            {flyMems.map((m) => (
+              // eslint-disable-next-line @next/next/no-img-element
               <img
-                key={flashMem}
-                src={flashMem}
+                key={m.id}
+                src={m.src}
                 alt=""
-                style={{
-                  position: "absolute",
-                  top: "44%",
-                  left: "50%",
-                  width: "74%",
-                  aspectRatio: "1",
-                  objectFit: "cover",
-                  borderRadius: 8,
-                  zIndex: 1,
-                  pointerEvents: "none",
-                  animation: "rcMemFlash 1.5s ease-in-out both",
-                  boxShadow: "0 0 90px rgba(255,235,205,0.25)",
-                }}
+                onAnimationEnd={() => setFlyMems((fm) => fm.filter((x) => x.id !== m.id))}
+                style={
+                  {
+                    position: "absolute",
+                    top: "44%",
+                    left: "50%",
+                    width: "58%",
+                    aspectRatio: "1",
+                    objectFit: "cover",
+                    borderRadius: 8,
+                    zIndex: 1,
+                    pointerEvents: "none",
+                    ["--dx" as string]: m.dx,
+                    ["--dy" as string]: m.dy,
+                    animation: "rcMemFly 2.2s cubic-bezier(0.22,0.6,0.36,1) both",
+                    boxShadow: "0 0 70px rgba(255,235,205,0.22)",
+                  } as React.CSSProperties
+                }
               />
-            )}
+            ))}
 
             {/* brightening wash as the arrival nears (bleeds into the veil) */}
             <div
@@ -1363,21 +1408,34 @@ export default function Home() {
               }}
             />
 
-            {/* the year, giant, alone */}
-            <div
-              style={{
-                position: "relative",
-                zIndex: 2,
-                fontFamily: SERIF,
-                fontSize: 148,
-                lineHeight: 1,
-                color: "#fff",
-                letterSpacing: -4,
-                fontVariantNumeric: "tabular-nums",
-                textShadow: "0 0 60px rgba(255,235,205,0.55), 0 2px 24px rgba(0,0,0,0.6)",
-              }}
-            >
-              {curYear}
+            {/* month above the giant year — the only other text on this
+                screen, loading is the show */}
+            <div style={{ position: "relative", zIndex: 2, textAlign: "center" }}>
+              <div
+                style={{
+                  fontWeight: 600,
+                  letterSpacing: "0.34em",
+                  fontSize: 14,
+                  color: "rgba(255,255,255,0.6)",
+                  textShadow: "0 0 20px rgba(255,235,205,0.35)",
+                }}
+              >
+                {curMonth}
+              </div>
+              <div
+                style={{
+                  fontFamily: SERIF,
+                  fontSize: 148,
+                  lineHeight: 1,
+                  color: "#fff",
+                  letterSpacing: -4,
+                  marginTop: 4,
+                  fontVariantNumeric: "tabular-nums",
+                  textShadow: "0 0 60px rgba(255,235,205,0.55), 0 2px 24px rgba(0,0,0,0.6)",
+                }}
+              >
+                {curYear}
+              </div>
             </div>
           </div>
         )}

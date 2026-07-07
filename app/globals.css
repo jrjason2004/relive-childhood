@@ -94,11 +94,23 @@ button {
   100% { transform: scale(1.13) translate(-2%, -1%); }
 }
 
-/* travel: a memory flashes up for a moment and dissolves (the translate
-   centers the flash; keep it in every frame) */
-@keyframes rcMemFlash {
-  0% { opacity: 0; transform: translate(-50%, -50%) scale(1.06); }
-  22% { opacity: 0.85; }
-  62% { opacity: 0.85; transform: translate(-50%, -50%) scale(1.01); }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+/* travel: a memory photo flies outward from the vanishing point past the
+   camera, matching the warp-line motion — --dx/--dy set its heading */
+@keyframes rcMemFly {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%)
+      translate(calc(var(--dx) * -6%), calc(var(--dy) * -6%)) scale(0.18);
+  }
+  16% { opacity: 0.92; }
+  68% {
+    opacity: 0.85;
+    transform: translate(-50%, -50%)
+      translate(calc(var(--dx) * 55%), calc(var(--dy) * 55%)) scale(1.5);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%)
+      translate(calc(var(--dx) * 92%), calc(var(--dy) * 92%)) scale(2.1);
+  }
 }
