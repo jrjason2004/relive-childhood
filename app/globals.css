@@ -93,3 +93,12 @@ button {
   0% { transform: scale(1.13) translate(2%, 1.5%); }
   100% { transform: scale(1.13) translate(-2%, -1%); }
 }
+
+/* travel: a memory flashes up for a moment and dissolves (the translate
+   centers the flash; keep it in every frame) */
+@keyframes rcMemFlash {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(1.06); }
+  22% { opacity: 0.85; }
+  62% { opacity: 0.85; transform: translate(-50%, -50%) scale(1.01); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+}

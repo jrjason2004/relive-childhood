@@ -115,7 +115,7 @@ export default function Home() {
     Array<{ idx: number; url: string; video?: string }>
   >([]);
   const [videoCount, setVideoCount] = useState(0); // finished Wan clips
-  const [loadTick, setLoadTick] = useState(0); // rotates the travel loading lines
+  const [flashMem, setFlashMem] = useState(""); // travel: brief memory-photo flash (url)
   const [total, setTotal] = useState(0);
   const [cursor, setCursor] = useState(0);
   const [genDone, setGenDone] = useState(false);
@@ -438,7 +438,6 @@ export default function Home() {
         if (travelTimer.current) clearInterval(travelTimer.current);
         return;
       }
-      setLoadTick(Math.floor((Date.now() - t0) / 3400));
       const a = arrivalRef.current;
       if (a) {
         const q = Math.min(1, (Date.now() - a.t0) / a.rampMs);
@@ -725,7 +724,7 @@ export default function Home() {
     setLiveDone(false);
     setVideoUrl("");
     setVideoCount(0);
-    setLoadTick(0);
+    setFlashMem("");
     setShowShare(false);
     setToast("");
     beginScan(runRef.current);
@@ -746,9 +745,7 @@ export default function Home() {
   const curYear = curDate.getFullYear();
   warpSpeedRef.current = eased; // the tunnel canvas reads this every frame
   curYearRef.current = curYear; // ...and matches polaroids to this year
-  const travelStatus = travelP < 92 ? "Rewinding" : "Arriving";
   const cityTrim = city.trim();
-  const cityLabel = cityTrim ? cityTrim.charAt(0).toUpperCase() + cityTrim.slice(1) : "your hometown";
   const cityValid = Boolean(cityTrim);
   const showMirror = screen === "scan" || screen === "city" || screen === "travel";
 
@@ -760,28 +757,15 @@ export default function Home() {
   povYearRef.current = povYear; // tunnel polaroids never go past this year
   const povLine = povCity ? `POV: Growing up in ${povYear} ${povCity}.` : "";
 
-  // Personalized loading lines that rotate under the travel countdown while
-  // the fleet films the first memories.
-  const loadLines = [
-    `rewinding to ${povYear}…`,
-    `finding your street in ${povCity || "your hometown"}…`,
-    `warming up the camcorder…`,
-    `developing ${povYear} memories…`,
-    `filming ${povCity || "home"} in ${povYear}…`,
-    `rewinding the tape a little further…`,
-  ];
-  const loadLine = loadLines[loadTick % loadLines.length];
-
-  // The polaroid memory tunnel: real pop-culture photos fly past as
-  // polaroids, chosen to match the year the rewind is passing through
-  // (curYearRef). Everything happens inside one rAF loop on one canvas —
-  // zero React state per frame, so the travel screen stays smooth.
+  // The time tunnel: light streaks racing outward past the camera, speed
+  // tied to the eased rewind progress. Pure lines on one canvas — the
+  // cheapest possible per-frame work.
   useEffect(() => {
     if (screen !== "travel") return;
     const canvas = tunnelRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     const w = canvas.offsetWidth;
     const h = canvas.offsetHeight;
     canvas.width = w * dpr;
@@ -789,50 +773,58 @@ export default function Home() {
     ctx.scale(dpr, dpr);
     const cx = w / 2;
     const cy = h * 0.44;
-
-    type Sprite = {
-      ox: number; // world-space offset from the tunnel axis
-      oy: number;
-      z: number; // distance from camera; shrinks each frame
-      rot: number;
-      img: HTMLImageElement;
-      year: number;
-      label: string;
+    const maxR = Math.hypot(cx, cy) + 40;
+    const stars = Array.from({ length: 90 }, () => ({
+      a: Math.random() * Math.PI * 2,
+      r: Math.pow(Math.random(), 0.6) * maxR,
+      w: 0.4 + Math.random() * 1.2,
+    }));
+    let raf = 0;
+    const step = () => {
+      ctx.clearRect(0, 0, w, h);
+      const sp = 0.16 + warpSpeedRef.current * 1.2;
+      for (const s of stars) {
+        const v = (0.35 + s.r * 0.012) * sp * 6;
+        const r2 = s.r + v;
+        const alpha = Math.min(0.55, 0.12 + (s.r / maxR) * 0.45) * Math.min(1, sp * 2);
+        ctx.strokeStyle = `rgba(240, 214, 180, ${alpha})`;
+        ctx.lineWidth = s.w;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(s.a) * s.r, cy + Math.sin(s.a) * s.r);
+        ctx.lineTo(cx + Math.cos(s.a) * r2, cy + Math.sin(s.a) * r2);
+        ctx.stroke();
+        if (r2 > maxR) {
+          s.r = Math.random() * 30;
+          s.a = Math.random() * Math.PI * 2;
+        } else {
+          s.r = r2;
+        }
+      }
+      raf = requestAnimationFrame(step);
     };
-    const FAR = 1500;
-    const sprites: Sprite[] = [];
-    const imgCache = new Map<string, HTMLImageElement>();
+    step();
+    return () => cancelAnimationFrame(raf);
+  }, [screen]);
+
+  // Flashes of memories: every few seconds a real photo from the year the
+  // rewind is passing appears for a moment and dissolves. One state update
+  // per flash (~every 3s), animated purely in CSS — nothing per-frame.
+  useEffect(() => {
+    if (screen !== "travel") return;
     let manifest: PolaroidEntry[] = [];
+    const cache = new Map<string, HTMLImageElement>();
+    const used = new Set<number>();
     let alive = true;
     fetch("/polaroids/manifest.json")
       .then((r) => r.json())
       .then((m: PolaroidEntry[]) => {
-        if (!alive) return;
-        manifest = m;
-        // Warm the cache around the starting year so the first sprites
-        // aren't blank cards.
-        m.filter((e) => Math.abs(e.y - curYearRef.current) < 4).forEach((e) => loadImg(e.f));
+        if (alive) manifest = m;
       })
       .catch(() => {});
-
-    function loadImg(f: string): HTMLImageElement {
-      let im = imgCache.get(f);
-      if (!im) {
-        im = new Image();
-        im.src = `/polaroids/${f}`;
-        imgCache.set(f, im);
-      }
-      return im;
-    }
-
-    // Pick the not-recently-shown photo closest to the year the rewind is
-    // passing; jitter keeps the same two from strict alternation. Only years
-    // on this user's actual journey qualify — nothing older than the
-    // childhood year the trip lands on, nothing newer than today.
-    const used = new Set<number>();
-    let lastSpawn = 0;
-    function spawn() {
-      if (manifest.length === 0) return;
+    const tick = () => {
+      if (!alive || manifest.length === 0) return;
+      // nearest not-recently-shown photo to the year being passed, bounded
+      // to this user's journey (today back to their childhood year)
       const nowYear = new Date().getFullYear();
       let best = -1;
       let bestD = Infinity;
@@ -850,95 +842,25 @@ export default function Home() {
         used.clear();
         return;
       }
-      used.add(best);
-      if (used.size > manifest.length - 8) used.clear();
       const e = manifest[best];
-      const a = Math.random() * Math.PI * 2;
-      const r = 0.24 + Math.random() * 0.55;
-      sprites.push({
-        ox: Math.cos(a) * r * w * 1.15,
-        oy: Math.sin(a) * r * h * 0.62,
-        z: FAR,
-        rot: (Math.random() - 0.5) * 0.5,
-        img: loadImg(e.f),
-        year: e.y,
-        label: e.l,
-      });
-    }
-
-    let raf = 0;
-    let prev = performance.now();
-    const step = (now: number) => {
-      const dt = Math.min(50, now - prev) / 1000;
-      prev = now;
-      ctx.clearRect(0, 0, w, h);
-      const speed = 120 + warpSpeedRef.current * 270; // z units/s toward camera — a slow drift
-      const interval = 520 - warpSpeedRef.current * 220; // spawn cadence
-      if (now - lastSpawn > interval && sprites.length < 14) {
-        spawn();
-        lastSpawn = now;
+      const src = `/polaroids/${e.f}`;
+      let im = cache.get(src);
+      if (!im) {
+        im = new Image();
+        im.src = src;
+        cache.set(src, im);
       }
-      sprites.sort((a, b) => b.z - a.z); // far first, near drawn on top
-      for (let i = sprites.length - 1; i >= 0; i--) {
-        const s = sprites[i];
-        s.z -= speed * dt;
-        if (s.z <= 50) {
-          sprites.splice(i, 1);
-          continue;
-        }
-        const persp = 330 / s.z;
-        const cw = 165 * persp; // polaroid card width on screen
-        if (cw < 9) continue;
-        const ch = cw * 1.22;
-        const x = cx + s.ox * persp;
-        const y = cy + s.oy * persp;
-        const fadeIn = Math.min(1, (FAR - s.z) / 320);
-        const fadeOut = Math.min(1, (s.z - 50) / 130);
-        ctx.globalAlpha = Math.min(fadeIn, fadeOut) * 0.96;
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(s.rot);
-        // white card
-        ctx.fillStyle = "#faf6ec";
-        ctx.fillRect(-cw / 2, -ch / 2, cw, ch);
-        // photo (square, cover-cropped; images ship pre-cropped square)
-        const m = cw * 0.06;
-        const iw = cw - 2 * m;
-        if (s.img.complete && s.img.naturalWidth > 0) {
-          const nw = s.img.naturalWidth;
-          const nh = s.img.naturalHeight;
-          const side = Math.min(nw, nh);
-          ctx.drawImage(
-            s.img,
-            (nw - side) / 2,
-            (nh - side) / 2,
-            side,
-            side,
-            -cw / 2 + m,
-            -ch / 2 + m,
-            iw,
-            iw,
-          );
-        } else {
-          ctx.fillStyle = "#e2d8c6";
-          ctx.fillRect(-cw / 2 + m, -ch / 2 + m, iw, iw);
-        }
-        // handwritten-style caption on the bottom strip
-        if (cw > 78) {
-          ctx.fillStyle = "rgba(66,52,38,0.85)";
-          ctx.font = `italic ${Math.max(9, cw * 0.082)}px Georgia, serif`;
-          ctx.textAlign = "center";
-          ctx.fillText(`${s.label} · ${s.year}`, 0, cw * 0.565, cw * 0.9);
-        }
-        ctx.restore();
-        ctx.globalAlpha = 1;
-      }
-      raf = requestAnimationFrame(step);
+      if (!(im.complete && im.naturalWidth > 0)) return; // flash it next tick
+      used.add(best);
+      setFlashMem(src);
     };
-    raf = requestAnimationFrame(step);
+    const first = setTimeout(tick, 1600);
+    const iv = setInterval(tick, 3200);
     return () => {
       alive = false;
-      cancelAnimationFrame(raf);
+      clearTimeout(first);
+      clearInterval(iv);
+      setFlashMem("");
     };
   }, [screen]);
 
@@ -1390,9 +1312,7 @@ export default function Home() {
               animation: "rcFade 0.8s ease both",
             }}
           >
-            {/* the polaroid memory tunnel: real pop-culture photos of the
-                years the rewind is passing fly by as polaroids (one canvas,
-                no per-frame React) */}
+            {/* the time tunnel: light streaks racing past the camera */}
             <canvas
               ref={tunnelRef}
               style={{
@@ -1400,10 +1320,34 @@ export default function Home() {
                 inset: 0,
                 width: "100%",
                 height: "100%",
-                zIndex: 1,
+                zIndex: 0,
                 pointerEvents: "none",
               }}
             />
+
+            {/* a flash of memory: a real photo from the year being passed
+                appears for a moment and dissolves */}
+            {flashMem && (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                key={flashMem}
+                src={flashMem}
+                alt=""
+                style={{
+                  position: "absolute",
+                  top: "44%",
+                  left: "50%",
+                  width: "74%",
+                  aspectRatio: "1",
+                  objectFit: "cover",
+                  borderRadius: 8,
+                  zIndex: 1,
+                  pointerEvents: "none",
+                  animation: "rcMemFlash 1.5s ease-in-out both",
+                  boxShadow: "0 0 90px rgba(255,235,205,0.25)",
+                }}
+              />
+            )}
 
             {/* brightening wash as the arrival nears (bleeds into the veil) */}
             <div
@@ -1419,60 +1363,21 @@ export default function Home() {
               }}
             />
 
-            <div style={{ position: "relative", textAlign: "center", zIndex: 2 }}>
-              <div
-                style={{
-                  fontWeight: 500,
-                  letterSpacing: "0.34em",
-                  fontSize: 12,
-                  color: "rgba(255,255,255,0.55)",
-                  textTransform: "uppercase",
-                }}
-              >
-                {travelStatus}
-              </div>
-              <div
-                style={{
-                  fontFamily: SERIF,
-                  fontSize: 96,
-                  lineHeight: 1,
-                  color: "#fff",
-                  letterSpacing: -2,
-                  margin: "10px 0 4px",
-                  fontVariantNumeric: "tabular-nums",
-                  textShadow: "0 0 46px rgba(255,235,205,0.45)",
-                }}
-              >
-                {curYear}
-              </div>
-              <div
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 14,
-                  marginTop: 8,
-                  fontWeight: 400,
-                  fontSize: 16,
-                  color: "rgba(255,255,255,0.66)",
-                }}
-              >
-                <span>{cityLabel}</span>
-              </div>
-              {/* rotating personalized loading line — the wait is part of
-                  the show while the fleet films the first memories */}
-              <div
-                key={loadLine}
-                style={{
-                  marginTop: 20,
-                  fontFamily: SERIF,
-                  fontStyle: "italic",
-                  fontSize: 15,
-                  color: "rgba(255,255,255,0.5)",
-                  animation: "rcFade 0.6s ease both",
-                }}
-              >
-                {loadLine}
-              </div>
+            {/* the year, giant, alone */}
+            <div
+              style={{
+                position: "relative",
+                zIndex: 2,
+                fontFamily: SERIF,
+                fontSize: 148,
+                lineHeight: 1,
+                color: "#fff",
+                letterSpacing: -4,
+                fontVariantNumeric: "tabular-nums",
+                textShadow: "0 0 60px rgba(255,235,205,0.55), 0 2px 24px rgba(0,0,0,0.6)",
+              }}
+            >
+              {curYear}
             </div>
           </div>
         )}
