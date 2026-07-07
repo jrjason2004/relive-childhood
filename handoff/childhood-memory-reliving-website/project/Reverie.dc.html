@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Figtree:wght@300;400;500;600&display=swap">
+<style>
+  html,body{margin:0;padding:0;background:#050409;}
+  *{box-sizing:border-box;}
+  .rc-input::placeholder{color:rgba(255,255,255,0.34);font-style:italic;}
+  @keyframes rcMorphIn{0%{opacity:0;backdrop-filter:blur(0px);-webkit-backdrop-filter:blur(0px);}100%{opacity:1;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);}}
+  @keyframes rcMemGlow{0%,100%{opacity:0.45;transform:translateX(-50%) scale(1);}50%{opacity:0.85;transform:translateX(-50%) scale(1.08);}}
+  @keyframes rcScan{0%{top:8%;}100%{top:92%;}}
+  @keyframes rcRetic{0%,100%{opacity:0.55;}50%{opacity:1;}}
+  @keyframes rcBlink{0%,100%{opacity:0.15;transform:scale(0.7);}50%{opacity:1;transform:scale(1);}}
+  @keyframes rcSpin{to{transform:rotate(360deg);}}
+  @keyframes rcSpinR{to{transform:rotate(-360deg);}}
+  @keyframes rcRise{0%{opacity:0;transform:translateY(14px);}100%{opacity:1;transform:translateY(0);}}
+  @keyframes rcFade{0%{opacity:0;}100%{opacity:1;}}
+  @keyframes rcKen{0%{transform:scale(1.02);}100%{transform:scale(1.18) translate(-2%,-3%);}}
+  @keyframes rcRayPulse{0%,100%{opacity:0.5;transform:scale(1);}50%{opacity:0.9;transform:scale(1.06);}}
+  @keyframes rcFloat{0%,100%{transform:translateY(0);}50%{transform:translateY(-12px);}}
+  @keyframes rcGridPan{0%{transform:translateY(0);}100%{transform:translateY(-40px);}}
+</style>
+</helmet>
+
+<div style="min-height:100vh;width:100%;display:flex;align-items:center;justify-content:center;font-family:'Figtree',sans-serif;background:#050409;">
+  <div style="position:relative;width:min(460px,100vw);height:min(940px,100vh);overflow:hidden;background:#0b0910;">
+
+    <!-- ============ PERSISTENT LIVE MIRROR (scan + city) ============ -->
+    <sc-if value="{{ showMirror }}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute;inset:0;overflow:hidden;">
+      <div style="position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 38%,#2a2536 0%,#141019 60%,#0a070f 100%);overflow:hidden;">
+        <video ref="{{ videoRef }}" autoplay muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:0.94;"></video>
+      </div>
+      <div style="position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 40%,transparent 40%,rgba(5,4,9,0.82) 100%);pointer-events:none;"></div>
+    </div>
+    </sc-if>
+
+    <!-- ================= SCAN / VIEWFINDER ================= -->
+    <sc-if value="{{ isScan }}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute;inset:0;">
+      <sc-if value="{{ camDeniedActive }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;top:38%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;">
+        <div style="font-family:'Figtree';font-weight:500;letter-spacing:0.14em;font-size:12px;color:rgba(255,255,255,0.5);text-transform:uppercase;">Camera unavailable</div>
+        <div style="margin-top:8px;font-family:'Figtree';font-weight:300;font-size:13px;color:rgba(255,255,255,0.4);max-width:24ch;">Allow camera access to look into the mirror.</div>
+      </div>
+      </sc-if>
+
+      <!-- reticle -->
+      <div style="position:absolute;top:24%;left:50%;transform:translateX(-50%);width:230px;height:300px;pointer-events:none;animation:rcRetic 2.4s ease-in-out infinite;">
+        <div style="position:absolute;top:0;left:0;width:34px;height:34px;border-top:2px solid rgba(255,255,255,0.9);border-left:2px solid rgba(255,255,255,0.9);border-top-left-radius:6px;"></div>
+        <div style="position:absolute;top:0;right:0;width:34px;height:34px;border-top:2px solid rgba(255,255,255,0.9);border-right:2px solid rgba(255,255,255,0.9);border-top-right-radius:6px;"></div>
+        <div style="position:absolute;bottom:0;left:0;width:34px;height:34px;border-bottom:2px solid rgba(255,255,255,0.9);border-left:2px solid rgba(255,255,255,0.9);border-bottom-left-radius:6px;"></div>
+        <div style="position:absolute;bottom:0;right:0;width:34px;height:34px;border-bottom:2px solid rgba(255,255,255,0.9);border-right:2px solid rgba(255,255,255,0.9);border-bottom-right-radius:6px;"></div>
+        <!-- detection dots -->
+        <div style="position:absolute;top:33%;left:28%;width:7px;height:7px;border-radius:50%;background:#fff;box-shadow:0 0 8px #fff;animation:rcBlink 1.6s ease-in-out infinite;"></div>
+        <div style="position:absolute;top:33%;right:28%;width:7px;height:7px;border-radius:50%;background:#fff;box-shadow:0 0 8px #fff;animation:rcBlink 1.6s ease-in-out infinite 0.3s;"></div>
+        <div style="position:absolute;top:52%;left:50%;width:7px;height:7px;border-radius:50%;background:#fff;box-shadow:0 0 8px #fff;animation:rcBlink 1.6s ease-in-out infinite 0.6s;"></div>
+        <div style="position:absolute;top:68%;left:38%;width:7px;height:7px;border-radius:50%;background:#fff;box-shadow:0 0 8px #fff;animation:rcBlink 1.6s ease-in-out infinite 0.9s;"></div>
+        <div style="position:absolute;top:68%;right:38%;width:7px;height:7px;border-radius:50%;background:#fff;box-shadow:0 0 8px #fff;animation:rcBlink 1.6s ease-in-out infinite 1.2s;"></div>
+      </div>
+
+      <!-- scan line -->
+      <sc-if value="{{ scanning }}" hint-placeholder-val="{{ true }}">
+      <div style="position:absolute;left:calc(50% - 130px);width:260px;height:2px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.95),transparent);box-shadow:0 0 18px rgba(255,255,255,0.7);animation:rcScan 1.8s ease-in-out infinite alternate;"></div>
+      </sc-if>
+
+      <!-- top HUD -->
+      <div style="position:absolute;top:0;left:0;right:0;padding:26px 26px 0;display:flex;align-items:center;justify-content:space-between;">
+        <div style="display:flex;align-items:center;gap:9px;">
+          <div style="width:8px;height:8px;border-radius:50%;background:#ff5b5b;box-shadow:0 0 10px #ff5b5b;animation:rcRetic 1.4s ease-in-out infinite;"></div>
+          <span style="font-family:'Figtree';font-weight:600;letter-spacing:0.34em;font-size:11px;color:#fff;text-transform:uppercase;">Relive Childhood</span>
+        </div>
+        <span style="font-family:'Figtree';font-weight:400;font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.55);">FRONT&nbsp;CAM</span>
+      </div>
+
+      <!-- bottom readout -->
+      <div style="position:absolute;left:0;right:0;bottom:0;padding:0 30px 46px;text-align:center;">
+        <sc-if value="{{ scanning }}" hint-placeholder-val="{{ true }}">
+        <div style="animation:rcFade 0.5s ease both;">
+          <div style="font-family:'Figtree';font-weight:500;letter-spacing:0.28em;font-size:12px;color:rgba(255,255,255,0.7);text-transform:uppercase;">{{ scanStatus }}</div>
+          <div style="margin:16px auto 0;width:180px;height:2px;border-radius:2px;background:rgba(255,255,255,0.18);overflow:hidden;">
+            <div style="{{ scanBarStyle }}"></div>
+          </div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ locked }}" hint-placeholder-val="{{ true }}">
+        <div style="animation:rcRise 0.7s ease both;">
+          <div style="font-family:'Figtree';font-weight:500;letter-spacing:0.28em;font-size:11px;color:rgba(255,255,255,0.6);text-transform:uppercase;">Estimated age</div>
+          <div style="font-family:'Instrument Serif';font-size:88px;line-height:0.95;color:#fff;margin:6px 0 2px;letter-spacing:-1px;">{{ startAge }}</div>
+          <div style="font-family:'Figtree';font-weight:300;font-size:14px;color:rgba(255,255,255,0.62);margin-bottom:26px;">Let's take you back {{ yearsBack }} years.</div>
+          <button onClick="{{ toCity }}" style="width:100%;border:none;cursor:pointer;padding:18px;border-radius:100px;font-family:'Figtree';font-weight:600;font-size:15px;color:#171019;background:#fff;box-shadow:0 14px 40px -12px rgba(255,255,255,0.4);">Rewind to age {{ childAge }}  →</button>
+        </div>
+        </sc-if>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ================= CITY (mirror morphs to memory) ================= -->
+    <sc-if value="{{ isCity }}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute;inset:0;z-index:4;display:flex;flex-direction:column;padding:64px 38px 46px;background:radial-gradient(120% 95% at 50% 62%,rgba(28,20,34,0.24),rgba(7,5,13,0.74));backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);animation:rcMorphIn 1.1s ease both;">
+      <div style="position:absolute;top:-8%;left:50%;width:130%;height:56%;background:radial-gradient(closest-side,rgba(240,190,140,0.24),transparent 72%);pointer-events:none;animation:rcMemGlow 5.5s ease-in-out infinite;"></div>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:center;position:relative;">
+        <div style="font-family:'Instrument Serif';font-size:48px;line-height:1.04;color:#faf5ee;">Where did you <span style="font-style:italic;color:#f0c79b;">grow up?</span></div>
+        <input class="rc-input" value="{{ city }}" onInput="{{ setCity }}" placeholder="e.g. Atlanta, Georgia" autofocus style="margin-top:34px;width:100%;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,0.28);outline:none;font-family:'Instrument Serif';font-size:32px;color:#faf5ee;padding:8px 2px 14px;caret-color:#f0c79b;" />
+      </div>
+      <button onClick="{{ toTravel }}" style="{{ cityBtnStyle }}">Take me back  →</button>
+    </div>
+    </sc-if>
+
+    <!-- ================= TIME TRAVEL ================= -->
+    <sc-if value="{{ isTravel }}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 45%,#ffffff 0%,#f6f1ea 60%,#ede4d6 100%);overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+      <!-- light rays -->
+      <div style="position:absolute;top:50%;left:50%;width:900px;height:900px;transform:translate(-50%,-50%);background:conic-gradient(from 0deg,rgba(240,200,150,0.0) 0deg,rgba(240,200,150,0.28) 8deg,rgba(240,200,150,0.0) 16deg,rgba(240,200,150,0.0) 20deg,rgba(230,190,150,0.24) 28deg,rgba(240,200,150,0.0) 36deg);animation:rcSpin 34s linear infinite;pointer-events:none;"></div>
+      <div style="position:absolute;top:50%;left:50%;width:620px;height:620px;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,0.9),rgba(255,255,255,0) 62%);animation:rcRayPulse 4s ease-in-out infinite;pointer-events:none;"></div>
+      <!-- orbit rings -->
+      <div style="position:absolute;top:50%;left:50%;width:340px;height:340px;transform:translate(-50%,-50%);border-radius:50%;border:1px solid rgba(176,106,69,0.18);animation:rcSpin 20s linear infinite;"></div>
+      <div style="position:absolute;top:50%;left:50%;width:470px;height:470px;transform:translate(-50%,-50%);border-radius:50%;border:1px dashed rgba(176,106,69,0.14);animation:rcSpinR 30s linear infinite;"></div>
+
+      <div style="position:relative;text-align:center;z-index:2;">
+        <div style="font-family:'Figtree';font-weight:500;letter-spacing:0.34em;font-size:12px;color:rgba(42,34,51,0.5);text-transform:uppercase;">{{ travelStatus }}</div>
+        <div style="font-family:'Instrument Serif';font-size:132px;line-height:0.9;color:#241c2e;letter-spacing:-2px;margin:14px 0 4px;font-variant-numeric:tabular-nums;">{{ curYear }}</div>
+        <div style="display:inline-flex;align-items:center;gap:14px;font-family:'Figtree';font-weight:400;font-size:16px;color:rgba(42,34,51,0.66);">
+          <span>you are <span style="font-family:'Instrument Serif';font-size:26px;color:#b06a45;font-variant-numeric:tabular-nums;">{{ curAge }}</span></span>
+          <span style="width:5px;height:5px;border-radius:50%;background:rgba(42,34,51,0.3);"></span>
+          <span>{{ cityLabel }}</span>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ================= RESULT / FILM ================= -->
+    <sc-if value="{{ isResult }}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute;inset:0;overflow:hidden;background:#000;">
+      <video ref="{{ filmRef }}" src="uploads/nostalgiatest.mp4" autoplay muted loop playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;"></video>
+
+      <!-- 3-dot menu -->
+      <div style="position:absolute;top:22px;right:20px;z-index:6;">
+        <button onClick="{{ toggleMenu }}" aria-label="More" style="width:44px;height:44px;border:none;cursor:pointer;border-radius:50%;background:rgba(20,16,26,0.32);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;">
+          <span style="width:5px;height:5px;border-radius:50%;background:#fff;"></span>
+          <span style="width:5px;height:5px;border-radius:50%;background:#fff;"></span>
+          <span style="width:5px;height:5px;border-radius:50%;background:#fff;"></span>
+        </button>
+        <sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;top:52px;right:0;min-width:190px;border-radius:16px;overflow:hidden;background:rgba(24,18,30,0.72);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);box-shadow:0 20px 50px -14px rgba(0,0,0,0.6),inset 0 0 0 1px rgba(255,255,255,0.08);animation:rcFade 0.22s ease both;">
+          <button onClick="{{ saveFilm }}" style="width:100%;border:none;cursor:pointer;background:transparent;color:#faf5ee;font-family:'Figtree';font-weight:500;font-size:14.5px;text-align:left;padding:15px 18px;display:flex;align-items:center;gap:11px;"><span style="font-size:15px;">↓</span>Save to camera roll</button>
+          <div style="height:1px;background:rgba(255,255,255,0.08);"></div>
+          <button onClick="{{ saveFilm }}" style="width:100%;border:none;cursor:pointer;background:transparent;color:#faf5ee;font-family:'Figtree';font-weight:500;font-size:14.5px;text-align:left;padding:15px 18px;display:flex;align-items:center;gap:11px;"><span style="font-size:15px;">↺</span>Watch again</button>
+          <div style="height:1px;background:rgba(255,255,255,0.08);"></div>
+          <button onClick="{{ restart }}" style="width:100%;border:none;cursor:pointer;background:transparent;color:rgba(250,245,238,0.62);font-family:'Figtree';font-weight:500;font-size:14.5px;text-align:left;padding:15px 18px;display:flex;align-items:center;gap:11px;"><span style="font-size:15px;">✕</span>Start over</button>
+        </div>
+        </sc-if>
+      </div>
+
+      <!-- saved toast -->
+      <sc-if value="{{ savedToast }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;left:50%;bottom:40px;transform:translateX(-50%);z-index:6;padding:12px 22px;border-radius:100px;background:rgba(24,18,30,0.72);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);color:#faf5ee;font-family:'Figtree';font-weight:500;font-size:14px;box-shadow:0 14px 34px -12px rgba(0,0,0,0.5);animation:rcFade 0.3s ease both;">Saved to your camera roll</div>
+      </sc-if>
+    </div>
+    </sc-if>
+
+    <!-- ============ WHITE VEIL (travel → film) ============ -->
+    <div style="{{ veilStyle }}"></div>
+
+    <!-- film grain -->
+    <sc-if value="{{ grain }}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute;inset:0;z-index:20;pointer-events:none;opacity:0.07;mix-blend-mode:soft-light;background-image:url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22160%22 height=%22160%22%3E%3Cfilter id=%22n%22%3E%3CfeTurbulence type=%22fractalNoise%22 baseFrequency=%220.85%22 numOctaves=%222%22/%3E%3C/filter%3E%3Crect width=%22100%25%22 height=%22100%25%22 filter=%22url(%23n)%22/%3E%3C/svg%3E');"></div>
+    </sc-if>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;100%&quot;,&quot;height&quot;:&quot;100%&quot;},&quot;startAge&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:32,&quot;min&quot;:18,&quot;max&quot;:80,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Time machine&quot;},&quot;childAge&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:6,&quot;min&quot;:3,&quot;max&quot;:12,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Time machine&quot;},&quot;fromYear&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:2026,&quot;min&quot;:2000,&quot;max&quot;:2030,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Time machine&quot;},&quot;grain&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Atmosphere&quot;},&quot;autoplay&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Playback&quot;}}">
+class Component extends DCLogic {
+  state = { screen:'scan', scanP:0, locked:false, city:'', travelP:0, sceneIndex:0, sceneProg:0, playing:true, veil:0, camDenied:false, menuOpen:false, savedToast:false };
+
+  constructor(props){ super(props); this._video = React.createRef(); this._film = React.createRef(); }
+
+  componentDidMount(){ this.startCam(); if(this.state.screen==='scan') this.startScan(); }
+  componentWillUnmount(){ this._clearAll(); this.stopCam(); }
+
+  async startCam(){
+    if(this._stream) return;
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'user', width:{ideal:1280}, height:{ideal:720} }, audio:false });
+      this._stream = stream;
+      this.setState({ camDenied:false });
+      const v = this._video.current;
+      if(v){ v.srcObject = stream; v.play && v.play().catch(()=>{}); }
+      else { this._pendingStream = stream; }
+    }catch(e){ this.setState({ camDenied:true }); }
+  }
+  componentDidUpdate(){
+    if(this._pendingStream && this._video.current){
+      this._video.current.srcObject = this._pendingStream;
+      this._video.current.play && this._video.current.play().catch(()=>{});
+      this._pendingStream = null;
+    }
+  }
+  stopCam(){ if(this._stream){ this._stream.getTracks().forEach(t=>t.stop()); this._stream=null; } }
+  _clearAll(){ clearInterval(this._scan); clearInterval(this._travel); clearInterval(this._reel); }
+
+  cfg(){
+    return {
+      startAge: this.props.startAge ?? 32,
+      childAge: this.props.childAge ?? 6,
+      fromYear: this.props.fromYear ?? 2026
+    };
+  }
+
+  startScan(){
+    clearInterval(this._scan);
+    this.setState({ scanP:0, locked:false });
+    const t0=Date.now(), dur=3200;
+    this._scan=setInterval(()=>{
+      const p=Math.min(100,(Date.now()-t0)/dur*100);
+      this.setState({ scanP:p });
+      if(p>=100){ clearInterval(this._scan); this._scan=null; setTimeout(()=>this.setState({locked:true}),350); }
+    },40);
+  }
+
+  setCity(e){ this.setState({ city:e.target.value }); }
+  toCity(){ this._clearAll(); this.setState({ screen:'city' }); }
+
+  toTravel(){
+    if(!this.state.city.trim()) return;
+    this._clearAll(); this.stopCam();
+    this.setState({ screen:'travel', travelP:0, veil:0 });
+    const t0=Date.now(), dur=6200;
+    this._travel=setInterval(()=>{
+      const p=Math.min(100,(Date.now()-t0)/dur*100);
+      const veil = p<78 ? 0 : (p-78)/22;
+      this.setState({ travelP:p, veil });
+      if(p>=100){
+        clearInterval(this._travel); this._travel=null;
+        this.setState({ screen:'result', veil:1 });
+        this.startReel();
+        // fade the white veil out to reveal the film
+        setTimeout(()=>this.setState({ veil:0 }), 260);
+      }
+    },40);
+  }
+
+  startReel(){
+    clearInterval(this._reel);
+    this.setState({ sceneIndex:0, sceneProg:0, playing:this.props.autoplay!==false });
+    const step=40, dur=4400;
+    this._reel=setInterval(()=>{
+      if(!this.state.playing) return;
+      const p=this.state.sceneProg+step/dur*100;
+      if(p>=100){ this.setState({ sceneIndex:(this.state.sceneIndex+1)%this.scenesRaw().length, sceneProg:0 }); }
+      else this.setState({ sceneProg:p });
+    },step);
+  }
+
+  togglePlay(){ this.setState(s=>({ playing:!s.playing })); }
+  replay(){ this.setState({ sceneIndex:0, sceneProg:0, playing:true }); }
+  toggleMenu(){ this.setState(s=>({ menuOpen:!s.menuOpen })); }
+  saveFilm(){
+    const v=this._film.current; if(v){ try{ v.currentTime=0; v.play&&v.play().catch(()=>{}); }catch(e){} }
+    this.setState({ menuOpen:false, savedToast:true });
+    clearTimeout(this._toast); this._toast=setTimeout(()=>this.setState({ savedToast:false }), 2400);
+  }
+  restart(){ this._clearAll(); this.setState({ screen:'scan', scanP:0, locked:false, city:'', travelP:0, sceneIndex:0, sceneProg:0, playing:true, veil:0, menuOpen:false, savedToast:false }); this.startCam(); this.startScan(); }
+
+  scenesRaw(){
+    const c=(this.state.city||'').trim()||'home';
+    const C=c.charAt(0).toUpperCase()+c.slice(1);
+    return [
+      { cap:"The long gold light of evening, when the day refused to end.", bg:"linear-gradient(158deg,#f7c17a 0%,#e8896a 52%,#6d3f61 100%)" },
+      { cap:"Bike wheels ticking over warm pavement — no hands, no fear.", bg:"linear-gradient(158deg,#f4a58e 0%,#c96f83 50%,#3d3358 100%)" },
+      { cap:"The corner store: coins warm in your fist, a whole summer for a dollar.", bg:"linear-gradient(158deg,#8fd0c2 0%,#4f93a0 50%,#2c3f5c 100%)" },
+      { cap:"Saturday mornings, cartoons glowing, the cereal going soft.", bg:"linear-gradient(158deg,#d8b8ea 0%,#a888c9 50%,#4a3f6b 100%)" },
+      { cap:"Your street at dusk, every porch light a small promise.", bg:"linear-gradient(160deg,#8aa0d8 0%,#5b6bab 45%,#241f45 100%)" },
+      { cap:C+", before you ever knew you'd leave.", bg:"linear-gradient(158deg,#f8d79a 0%,#eaa26a 50%,#7a4a55 100%)" }
+    ];
+  }
+
+  renderVals(){
+    const s=this.state, cf=this.cfg();
+    const scanning = s.screen==='scan' && !s.locked;
+    const scanStatus = s.scanP<34 ? 'Locating face' : s.scanP<70 ? 'Mapping features' : 'Estimating age';
+    const yearsBack = cf.startAge - cf.childAge;
+    const childYear = cf.fromYear - yearsBack;
+
+    // travel counters
+    const curAge = Math.round(cf.startAge - (yearsBack)*s.travelP/100);
+    const curYear = Math.round(cf.fromYear - (yearsBack)*s.travelP/100);
+    const travelStatus = s.travelP<92 ? 'Rewinding' : 'Arriving';
+
+    const cityLabel = (s.city||'').trim() ? (s.city.trim().charAt(0).toUpperCase()+s.city.trim().slice(1)) : 'your hometown';
+    const cityValid = !!(s.city||'').trim();
+
+    const raw=this.scenesRaw();
+    const scenes=raw.map((sc,i)=>({
+      style:{position:'absolute',inset:0,transition:'opacity 1.5s ease',opacity:i===s.sceneIndex?1:0,background:sc.bg},
+      kenStyle:{position:'absolute',inset:0,background:sc.bg,animation:i===s.sceneIndex?'rcKen 6s ease-out both':'none',opacity:0.9}
+    }));
+    const segments=raw.map((_,i)=>{
+      const w=i<s.sceneIndex?100:(i===s.sceneIndex?s.sceneProg:0);
+      return { inner:{height:'100%',width:w+'%',background:'#f8ecd8',transition:i===s.sceneIndex?'width 0.1s linear':'width 0.3s ease'} };
+    });
+
+    return {
+      isScan:s.screen==='scan', isCity:s.screen==='city', isTravel:s.screen==='travel', isResult:s.screen==='result',
+      showMirror: s.screen==='scan' || s.screen==='city',
+      videoRef:this._video, camDeniedActive:s.camDenied && !s.locked,
+      scanning, locked:s.locked, scanStatus,
+      scanBarStyle:{height:'100%',width:s.scanP+'%',background:'#fff',transition:'width 0.1s linear'},
+      startAge:cf.startAge, childAge:cf.childAge, yearsBack, childYear,
+
+      city:s.city, setCity:(e)=>this.setCity(e),
+      cityLabel,
+      cityBtnStyle:{width:'100%',border:'none',cursor:cityValid?'pointer':'default',padding:'18px',borderRadius:'100px',fontFamily:"'Figtree',sans-serif",fontWeight:600,fontSize:'15px',color:'#171019',background:'#fff',boxShadow:'0 14px 40px -12px rgba(255,255,255,0.35)',opacity:cityValid?1:0.35,pointerEvents:cityValid?'auto':'none',transition:'opacity 0.3s ease'},
+
+      curAge, curYear, travelStatus,
+
+      filmRef:this._film,
+      menuOpen:s.menuOpen, savedToast:s.savedToast,
+      toggleMenu:()=>this.toggleMenu(), saveFilm:()=>this.saveFilm(),
+
+      toCity:()=>this.toCity(), toTravel:()=>this.toTravel(),
+      togglePlay:()=>this.togglePlay(), replay:()=>this.replay(), restart:()=>this.restart(),
+
+      grain:this.props.grain!==false,
+      veilStyle:{position:'absolute',inset:0,zIndex:15,background:'#ffffff',opacity:s.veil,pointerEvents:'none',transition:s.screen==='result'?'opacity 1.7s ease':'opacity 0.2s linear'}
+    };
+  }
+}
+</script>
+</body>
+</html>
