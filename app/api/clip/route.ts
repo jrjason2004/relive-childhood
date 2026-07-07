@@ -5,7 +5,7 @@ import { fetchReferenceImages } from "@/lib/serpapi";
 import { saveClip } from "@/lib/video";
 
 export const runtime = "nodejs";
-export const maxDuration = 3000;
+export const maxDuration = 600; // Wan clips are a local-only path anyway
 
 // One moment → real refs → Nano Banana 2 still → Wan 2.2 A14B clip → saved to session.
 export async function POST(req: Request) {
