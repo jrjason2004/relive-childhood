@@ -2,19 +2,19 @@
 
 // Reverie — cinematic flow from the Claude Design handoff
 // (handoff/childhood-memory-reliving-website/project/Reverie.dc.html), wired
-// to the real pipeline: scan → Gemini age estimate (the warm slides start
-// rendering here), city → research, time travel → an accelerating date rewind
-// over the live camera (the session music starts here and runs continuously),
-// film → a live index-order film of 7 scenes (3 era-only warm + 4 researched):
-// each scene's Nano Banana still appears instantly (surfacing as a slow, soft
-// full-screen glimpse on the travel countdown) and upgrades in place to a
-// Wan 2.2 motion clip as the fleet finishes it — clips loop within their
-// scene, stills Ken Burns until then. The reveal waits for the first Wan clip,
-// with rotating personalized loading lines keeping the travel screen alive. A
-// TikTok-style "POV: {city} in {year}" line sits on the film and is burned
-// into the shareable mp4 (ffmpeg hybrid stitch: clips + Ken Burns fallbacks +
-// music + POV text), offered via the share sheet after the first full pass. The
-// film screen itself never shows progress popups. Set NEXT_PUBLIC_USE_WAN=1 for
+// to the real pipeline: scan → Gemini age estimate, city → research, time
+// travel → the tear-off-calendar rewind over the live camera (the session
+// music starts here and runs continuously), film → 7 scenes, every one a
+// researched, location-specific moment (no generic era filler): Nano Banana
+// still → Wan 2.2 clip, and the still is never shown — the film is
+// video-only. The reveal deliberately waits until EVERY clip has generated
+// (the calendar show + rotating personalized loading lines carry the whole
+// wait), then the film plays start-to-finish as one continuous piece: each
+// 2s scene hard-cuts to the next, no crossfades, no mid-film loops or waits.
+// A TikTok-style "POV: {city} in {year}" line sits on the film and is burned
+// into the shareable mp4 (ffmpeg stitch: clips + hard cuts + music + POV
+// text), offered via the share sheet after the first full pass. The film
+// screen itself never shows progress popups. Set NEXT_PUBLIC_USE_WAN=1 for
 // the legacy pure-clip path.
 
 import { useEffect, useRef, useState } from "react";
@@ -37,48 +37,10 @@ type SlideSpec = {
   mode?: "generated" | "real"; // real = archival-photo keepsake slide
 };
 
-// Landmark-free scenes for the warm clip (index 0), which starts rendering
-// while the user is still typing their hometown — the era does the nostalgia
-// work, so no location research is needed.
-const WARM_SCENES: Array<{ image: string; video: string }> = [
-  {
-    image:
-      "A quiet suburban cul-de-sac at golden hour: kids the same age ride bikes in loose circles, chalk drawings cover the driveway, a neighbor waters the lawn.",
-    video:
-      "Gentle walk forward at a small child's height as the kids on bikes loop past; warm low evening light; subtle handheld sway. No scene cuts.",
-  },
-  {
-    image:
-      "A summer backyard: kids run shrieking through a lawn sprinkler, towels thrown over plastic chairs, popsicles melting fast in small hands.",
-    video:
-      "Slow look around from a small child's height as kids dart through the sprinkler arc; water catches the sun; subtle handheld sway. No scene cuts.",
-  },
-  {
-    image:
-      "A Saturday-morning living room: cartoons glow on the family TV, cereal bowls on the carpet, siblings sprawled in pajamas among scattered toys.",
-    video:
-      "Gentle push-in at a small child's height toward the glowing TV as a sibling laughs and reaches into a cereal bowl; soft morning light. No scene cuts.",
-  },
-  {
-    image:
-      "A neighborhood park playground on a summer afternoon: kids swarm the jungle gym and swings, sneakers kicking up wood chips, a kickball game starting on the grass.",
-    video:
-      "Slow look around from a small child's height as kids race past toward the swings; bright midday sun; subtle handheld sway. No scene cuts.",
-  },
-  {
-    image:
-      "An ice cream truck stopped on a summer street: kids crowd around clutching coins and crumpled dollar bills, studying the faded picture menu on the truck's side.",
-    video:
-      "Gentle walk forward at a small child's height joining the crowd of kids at the truck window; heat shimmer off the asphalt; subtle handheld sway. No scene cuts.",
-  },
-];
-
 const CONCURRENCY = 7;
 const CHILD_AGE = 7; // matches the POV age in the image/video prompts
 const USE_WAN = process.env.NEXT_PUBLIC_USE_WAN === "1"; // motion clips instead of stills
-const WARM_COUNT = 3; // era-only slides that start rendering at the age reveal
-const SLIDE_MS = 2000; // 7 slides × 2s = a 14s first pass
-const KEN_ANIMS = ["rcKenA", "rcKenB", "rcKenC", "rcKenD"];
+const SLIDE_MS = 2000; // 7 slides × 2s = a 14s pass
 const SANS = "var(--font-sans), sans-serif";
 const SERIF = "var(--font-serif), serif";
 
@@ -244,7 +206,6 @@ export default function Home() {
   const warpRef = useRef<HTMLCanvasElement | null>(null);
   const warpSpeedRef = useRef(0); // eased travel progress, read by the warp rAF loop
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const warmRef = useRef<Promise<Array<number | null>> | null>(null); // warm slides (first indices)
   const arrivalRef = useRef<{ from: number; t0: number; rampMs: number } | null>(null);
   const revealFiredRef = useRef(false);
   const sessionRef = useRef("");
@@ -326,41 +287,17 @@ export default function Home() {
     if (runRef.current !== run) return;
     setProfile(prof);
     setScanP(100);
-    // The session starts the moment the profile exists, so the warm slide —
-    // a generic, era-only scene with no landmarks — renders while the user is
-    // still looking at the age reveal and typing their hometown.
+    // Every scene is location-specific, so nothing can render until the user
+    // names their hometown — the session just gets its id here.
     if (!sessionRef.current) {
-      const sessionId =
+      sessionRef.current =
         typeof crypto !== "undefined" && crypto.randomUUID
           ? crypto.randomUUID()
           : String(Date.now());
-      sessionRef.current = sessionId;
-      startWarmSlide(run, sessionId, prof);
     }
     setTimeout(() => {
       if (runRef.current === run) setLocked(true);
     }, 350);
-  }
-
-  function startWarmSlide(run: number, sessionId: string, prof: Profile) {
-    const birthYear = new Date().getFullYear() - prof.ageYears;
-    const span = `${birthYear + 5}–${birthYear + 13}`;
-    const decade = `${Math.floor((birthYear + 9) / 10) * 10}s`;
-    // Several era-only scenes fire immediately, in parallel — no research, no
-    // reference-photo fetch (the era lives in the prompt), so the first
-    // memories exist before the user finishes typing their hometown.
-    const scenes = [...WARM_SCENES]
-      .sort(() => Math.random() - 0.5)
-      .slice(0, WARM_COUNT);
-    warmRef.current = Promise.all(
-      scenes.map((scene, k) =>
-        buildSlide(run, sessionId, k, {
-          imagePrompt: `${scene.image} The scene is set explicitly in ${span} (${decade}): clothes, hairstyles, toys, cars and houses all match those years. A generic anywhere-in-America setting — absolutely no recognizable landmarks, store names or signage. The viewer's own small child's hands (${prof.skinTone} skin tone) may appear naturally at the edge of the frame.`,
-          videoPrompt: scene.video,
-          mode: "generated",
-        }),
-      ),
-    );
   }
 
   function beginScan(run: number) {
@@ -553,10 +490,12 @@ export default function Home() {
     arrivalRef.current = null;
     revealFiredRef.current = false;
 
-    // Progress creeps to 97% over ~40s until the first clip is ready; then
-    // the arrival ramp (armed by the effect below) accelerates it to 100%
-    // and the veil reveals the film. The displayed date rewinds on an
-    // ease-in curve of this progress, so it starts slow and speeds up.
+    // Progress creeps to 97% over ~80s — research + stills + all seven Wan
+    // clips take a while, and the reveal deliberately waits for every clip so
+    // the film plays through as one continuous piece. The arrival ramp (armed
+    // by the effect below once generation is done) accelerates it to 100% and
+    // the veil reveals the film. The displayed date rewinds on an ease-in
+    // curve of this progress, so it starts slow and speeds up.
     const t0 = Date.now();
     travelT0Ref.current = t0;
     travelTimer.current = setInterval(() => {
@@ -574,7 +513,7 @@ export default function Home() {
           reveal(run);
         }
       } else {
-        setTravelP((p) => Math.max(p, Math.min(97, ((Date.now() - t0) / 40000) * 100)));
+        setTravelP((p) => Math.max(p, Math.min(97, ((Date.now() - t0) / 80000) * 100)));
       }
     }, 40);
 
@@ -612,16 +551,13 @@ export default function Home() {
       if (runRef.current !== run) return;
 
       const moments: Moment[] = data.moments ?? [];
-      // The warm slides (first indices) have been rendering since the age
-      // reveal. Keep the instant warm start, then add four researched POV
-      // moments for a seven-scene film.
-      const warm = warmRef.current;
-      const warmCount = warm ? WARM_COUNT : 0;
-      const queue = moments.slice(0, Math.max(0, 7 - warmCount));
-      setTotal(warmCount + queue.length);
+      // All seven scenes come from research — every one anchored to the
+      // hometown, no generic era-only filler.
+      const queue = moments.slice(0, 7);
+      setTotal(queue.length);
 
       const tasks = queue.map((m, j) => () =>
-        buildSlide(run, sessionId, warmCount + j, {
+        buildSlide(run, sessionId, j, {
           imagePrompt: m.imagePrompt,
           videoPrompt: m.videoPrompt,
           referenceQuery: m.referenceQuery,
@@ -629,15 +565,11 @@ export default function Home() {
         }),
       );
 
-      const poolPromise = runPool(tasks, CONCURRENCY);
-      const [warmResults, poolResults] = await Promise.all([
-        warm ?? Promise.resolve<Array<number | null>>([]),
-        poolPromise,
-      ]);
+      const poolResults = await runPool(tasks, CONCURRENCY);
       if (runRef.current !== run) return;
       setGenDone(true);
 
-      const ok = [...warmResults, ...poolResults]
+      const ok = poolResults
         .filter((x): x is number => x !== null)
         .sort((a, b) => a - b);
       if (ok.length === 0) throw new Error("The film couldn't be developed");
@@ -687,22 +619,19 @@ export default function Home() {
     }
   }
 
-  // First available clip arms the arrival: the countdown accelerates from
-  // wherever it is to 100% over a few seconds, then reveal() fires. If the
-  // warm clip finished while the user was still typing, this arms immediately
-  // on entering travel — a slightly longer ramp keeps it cinematic.
+  // The arrival arms only when the WHOLE film is generated (genDone: every
+  // scene's clip has settled), so the reveal plays start-to-finish as one
+  // continuous video with zero mid-film waits — the calendar show carries the
+  // entire generation. The countdown then accelerates to 100% and reveals.
   useEffect(() => {
     if (screen !== "travel" || playlist.length === 0 || arrivalRef.current) return;
-    // The film is video-only, so a non-empty playlist already means at least
-    // one Wan clip is playable — the calendar show carries the wait until
-    // then. (The videoCount check is belt-and-braces for the legacy path.)
-    if (!USE_WAN && videoCount === 0) return;
+    if (!USE_WAN && !genDone) return;
     arrivalRef.current = {
       from: travelP,
       t0: Date.now(),
       rampMs: travelP < 15 ? 6000 : 3500,
     };
-  }, [screen, playlist.length, travelP, videoCount]);
+  }, [screen, playlist.length, travelP, genDone]);
 
   // ================= live player driver =================
 
@@ -753,17 +682,8 @@ export default function Home() {
     });
   }, [screen, cursor, playlist]);
 
-  // Crossfade bookkeeping: the previous slide stays fully visible underneath
-  // while the new one fades in on top (no dip to black).
+  // Scenes hard-cut between each other — no crossfade.
   const shownIdx = playlist.length > 0 ? Math.min(cursor, playlist.length - 1) : -1;
-  const prevShownRef = useRef(-1);
-  const [prevIdx, setPrevIdx] = useState(-1);
-  useEffect(() => {
-    if (shownIdx !== prevShownRef.current) {
-      setPrevIdx(prevShownRef.current);
-      prevShownRef.current = shownIdx;
-    }
-  }, [shownIdx]);
 
   // Wan mode: start the current clip. The next clip is mounted early as a
   // hidden, fully-buffered <video>; when the cursor reaches it, autoPlay has
@@ -852,12 +772,9 @@ export default function Home() {
     prevDecadeRef.current = -1;
     warpSpeedRef.current = 0;
     clipRefs.current = [];
-    warmRef.current = null;
     arrivalRef.current = null;
     revealFiredRef.current = false;
     sessionRef.current = "";
-    prevShownRef.current = -1;
-    setPrevIdx(-1);
     setScreen("scan");
     setCamDenied(false);
     setScanP(0);
@@ -1633,22 +1550,12 @@ export default function Home() {
         {screen === "film" && (
           <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#000" }}>
             {!USE_WAN ? (
-              // Ken Burns slideshow: every slide stays mounted; the current
-              // one fades in over the previous (no dip to black) and gets a
-              // fresh, endlessly drifting Ken Burns run while it's showing —
-              // during waits it never freezes.
+              // Every scene's clip is fully generated before the reveal, so
+              // this plays start-to-finish like one continuous video: each
+              // clip runs once for its 2s scene, hard cut to the next.
               playlist.map((p, i) => {
                 const isShown = i === shownIdx;
-                const isPrev = i === prevIdx && prevIdx !== shownIdx;
-                const layer: React.CSSProperties = {
-                  ...FULL_BLEED,
-                  zIndex: isShown ? 2 : isPrev ? 1 : 0,
-                  opacity: isShown || isPrev ? 1 : 0,
-                  transition: "opacity 0.45s ease",
-                };
-                // A scene that has its Wan clip plays real motion; until then
-                // the still drifts.
-                return p.video ? (
+                return (
                   <video
                     key={p.video}
                     ref={(el) => {
@@ -1656,25 +1563,12 @@ export default function Home() {
                     }}
                     src={p.video}
                     muted
-                    loop
                     playsInline
                     autoPlay={isShown}
                     style={{
-                      ...layer,
-                      animation: isShown ? "rcFade 0.45s ease both" : "none",
-                    }}
-                  />
-                ) : (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    key={p.url}
-                    src={p.url}
-                    alt=""
-                    style={{
-                      ...layer,
-                      animation: isShown
-                        ? `${KEN_ANIMS[i % KEN_ANIMS.length]} 7s ease-in-out infinite alternate, rcFade 0.45s ease both`
-                        : "none",
+                      ...FULL_BLEED,
+                      zIndex: isShown ? 2 : 0,
+                      opacity: isShown ? 1 : 0,
                     }}
                   />
                 );

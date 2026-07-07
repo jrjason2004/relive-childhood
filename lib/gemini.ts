@@ -91,22 +91,23 @@ Their core childhood years were roughly ${childhoodSpan}.
 
 Find SEVEN hyper-specific, niche nostalgic things from growing up in ${city} during that exact window.
 Lean toward what someone of that apparent gender, in that place and era, would most likely have loved (toys, shows, games, hobbies, brands) — make a confident best guess without being stereotypical or exclusionary. Make all 7 distinct.
-Frame every moment so it plausibly happens during SUMMER VACATION — no school-day scenes (no classrooms, no recess, no school buses). Order the 7 in the order they would unfold across one packed summer day, morning to evening. Favor things like:
-- a REAL local landmark, store, mall, restaurant, arcade, or annual town event specific to ${city}
-- popular toys, shows, games, fads of that exact era
-- a moment that fuses a local place WITH an era fad (e.g. trading Silly Bandz outside a specific local diner)
+Frame every moment so it plausibly happens during SUMMER VACATION — no school-day scenes (no classrooms, no recess, no school buses). Order the 7 in the order they would unfold across one packed summer day, morning to evening.
+
+NON-NEGOTIABLE — every single one of the 7 must be UNMISTAKABLY ANCHORED TO ${city}. A viewer from ${city} should think "that's OUR town," not "that's any town." Generic anywhere-in-America scenes (a nameless backyard, a nameless cul-de-sac, a nameless pool) are NOT acceptable for any of the 7. Anchor each one with things like:
+- a REAL local landmark, store, mall, restaurant, arcade, pool, park, or annual town event specific to ${city} (named)
+- real named neighborhoods, streets, regional chains, local geography/skyline, the local minor-league or pro team, the local water park or county fair
+- a moment that fuses a verified local place WITH an era fad (e.g. trading Pokémon cards outside a specific named local diner)
 
 CRITICAL — era accuracy for real places. This person will instantly notice an anachronism:
 - Before naming ANY real landmark, store, mall, restaurant, arcade, park, or event, verify with search that it existed AND was open to the public during ${childhoodSpan}. Check the opening date. Something that opened even a year after that window is disqualified, no matter how iconic it is today.
 - A place that has since closed or been demolished is GREAT (extra nostalgic) as long as it was open during ${childhoodSpan} — describe it as it was then.
-- If you cannot confirm a place existed in that window, DO NOT name it. Use a generic era-typical setting instead: a typical ${city}-area suburban house, backyard, cul-de-sac, neighborhood pool, or school gym of that era, anchored to a toy/show/fad that is definitely from ${childhoodSpan}.
-- Era accuracy beats specificity: a correct generic scene always beats an iconic landmark from the wrong years. At most 2-3 of the 7 need named places; the rest can be era-perfect generic settings.
+- If you cannot confirm a place existed in that window, DO NOT name it — take the time to search for and pick a DIFFERENT verified local anchor instead. Never fall back to a generic scene; there is always another real local place, event, chain, or geographic feature that checks out.
 - Everything visible in the scenes (signage, cars, clothes, devices, toys) must be plausible for ${childhoodSpan} — no smartphones or modern branding if the window predates them.
 
 For each of the 7, return:
 - "title": short punchy name
 - "description": 1-2 sentences on what it is and why it's nostalgic for this place + era
-- "imagePrompt": a SIMPLE, true first-person POV photo from the eyes of a YOUNG CHILD, around 7 years old. The vantage point is LOW — at a small child's height — looking out and slightly up at the moment: other young children the same age, taller grown-ups, and the real place around them. The viewer is a little kid living and walking through it, not staring at an object. Their own SMALL child's hands (${skinTone} skin tone, little kid hands) may appear naturally at the edge of the frame, but keep the focus on the surroundings and the other young kids. Do not show the viewer's face. State explicitly that the scene is set in ${childhoodSpan} so every detail (signage, cars, clothes, devices) matches those years. Warm nostalgic film look, era-accurate details, 9:16 vertical.
+- "imagePrompt": a SIMPLE, true first-person POV photo from the eyes of a YOUNG CHILD, around 7 years old. The vantage point is LOW — at a small child's height — looking out and slightly up at the moment: other young children the same age, taller grown-ups, and the real place around them. The location anchor must be VISIBLE in the frame (the actual signage, storefront, landmark, or unmistakable local setting — name it in the prompt). The viewer is a little kid living and walking through it, not staring at an object. Their own SMALL child's hands (${skinTone} skin tone, little kid hands) may appear naturally at the edge of the frame, but keep the focus on the surroundings and the other young kids. Do not show the viewer's face. State explicitly that the scene is set in ${childhoodSpan} so every detail (signage, cars, clothes, devices) matches those years. Warm nostalgic film look, era-accurate details, 9:16 vertical.
 - "videoPrompt": how this still comes alive as a 4-second clip — subtle, realistic motion from the low child's-eye view: a gentle walk-forward or look-around, other young children moving naturally. No scene cuts.
 - "referenceQuery": the best Google Images search query to retrieve REAL photos of the specific landmark/object/place named (be specific, include city + era if helpful).
 - "kind": "place" if the moment centers on a NAMED real location (landmark, store, mall, restaurant, arcade, park, event venue) whose real archival photos would be findable on Google Images; "generic" for era-typical scenes not tied to one named location.

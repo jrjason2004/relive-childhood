@@ -152,24 +152,22 @@ export async function stitchStills(sessionId: string, indices: number[]): Promis
   return out;
 }
 
-// Render the shareable film from whatever each slide has: the Wan clip when
-// it rendered (looped to fill its segment, upscaled to 1080x1920), otherwise
-// a Ken Burns pass over the still. Segments join with short crossfades and the
-// TikTok-style POV line is burned in on top. The visual pass is fixed to
-// indices.length × 2 seconds; segment duration compensates for crossfade
-// overlap so seven scenes render to 14 seconds.
+// Render the shareable film: each scene's Wan clip runs for its 2s segment
+// and scenes join with HARD CUTS (no crossfade — deliberate, TikTok-style),
+// with the POV line burned in on top. Seven scenes render to exactly 14
+// seconds. (A Ken Burns pass over the still remains as a per-scene fallback
+// for the legacy path, but video-only sessions never hit it.)
 export async function stitchHybrid(
   sessionId: string,
   indices: number[],
   povPng: Buffer | null,
 ): Promise<string> {
   const out = finalPath(sessionId);
-  const FADE = 0.35;
   const FPS = 30;
 
   const n = indices.length;
   const totalSeconds = n * HYBRID_SCENE_SECONDS;
-  const SEG = (totalSeconds + (n - 1) * FADE) / n;
+  const SEG = HYBRID_SCENE_SECONDS;
   const frames = Math.round(SEG * FPS);
 
   const kens = [
@@ -204,15 +202,10 @@ export async function stitchHybrid(
   }
 
   let vout = "[v0]";
-  for (let k = 1; k < n; k++) {
-    const offset = (SEG - FADE) * k;
-    const label = `[x${k}]`;
-    parts.push(`${vout}[v${k}]xfade=transition=fade:duration=${FADE}:offset=${offset.toFixed(2)}${label}`);
-    vout = label;
-  }
-  if (n === 1) {
-    parts.push(`[v0]copy[x0]`);
-    vout = "[x0]";
+  if (n > 1) {
+    const labels = Array.from({ length: n }, (_, k) => `[v${k}]`).join("");
+    parts.push(`${labels}concat=n=${n}:v=1:a=0[xout]`);
+    vout = "[xout]";
   }
 
   // TikTok-style POV line, burned in near the top. The client renders it to
