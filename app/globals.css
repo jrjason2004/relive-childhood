@@ -93,16 +93,3 @@ button {
   0% { transform: scale(1.13) translate(2%, 1.5%); }
   100% { transform: scale(1.13) translate(-2%, -1%); }
 }
-/* travel calendar: a month page tears off the top binding and flutters
-   away; --rz varies the sideways flutter per page */
-@keyframes rcRip {
-  0% { transform: rotateX(0deg) rotateZ(0deg) translateY(0); opacity: 1; }
-  30% { transform: rotateX(-78deg) rotateZ(calc(var(--rz) * 0.35)) translateY(6px); opacity: 1; }
-  100% { transform: rotateX(-24deg) rotateZ(var(--rz)) translateY(340px) scale(0.82); opacity: 0; }
-}
-/* travel: a decade label zooms past the camera as we fall through it */
-@keyframes rcDecade {
-  0% { transform: translate(-50%, -50%) scale(0.25); opacity: 0; }
-  28% { opacity: 1; }
-  100% { transform: translate(-50%, -50%) scale(2.6); opacity: 0; }
-}

@@ -44,68 +44,10 @@ const SLIDE_MS = 2000; // 7 slides × 2s = a 14s pass
 const SANS = "var(--font-sans), sans-serif";
 const SERIF = "var(--font-serif), serif";
 
-// Tear-off calendar: at most one page rips per travel tick, throttled so the
-// fast phase reads as a flurry instead of a solid blur.
-const RIP_MS = 750; // one page's tear-and-fly
-const RIP_MIN_GAP_MS = 70;
-const MAX_RIPS = 8;
-
-// One month page of the travel calendar (also the pages that tear off).
-function CalendarPage({ month, year }: { month: string; year: number }) {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        background: "linear-gradient(#fbf6ec, #ebdfc9)",
-        borderRadius: 10,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        boxShadow: "0 10px 22px -8px rgba(0,0,0,0.55)",
-        backfaceVisibility: "hidden",
-      }}
-    >
-      <div style={{ fontWeight: 700, letterSpacing: "0.24em", fontSize: 14, color: "#8d2f23" }}>
-        {month}
-      </div>
-      <div
-        style={{
-          fontFamily: SERIF,
-          fontSize: 56,
-          lineHeight: 1.05,
-          color: "#241c15",
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >
-        {year}
-      </div>
-      <div
-        style={{
-          marginTop: 12,
-          display: "grid",
-          gridTemplateColumns: "repeat(7, 17px)",
-          rowGap: 4,
-        }}
-      >
-        {Array.from({ length: 28 }, (_, i) => (
-          <div
-            key={i}
-            style={{
-              fontSize: 8,
-              textAlign: "center",
-              color: "rgba(60,45,30,0.45)",
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
-            {i + 1}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+// Travel tunnel: real pop-culture photos (2 per year, last ~80 years, from
+// public/polaroids/) fly past as polaroids, matched to the year the rewind
+// is passing through. Drawn entirely on one canvas — no per-frame React.
+type PolaroidEntry = { y: number; l: string; f: string };
 
 // The POV line as a transparent 1080-wide PNG data URL for the ffmpeg
 // overlay — same TikTok look as the live element (bold white, thick black
@@ -173,11 +115,6 @@ export default function Home() {
     Array<{ idx: number; url: string; video?: string }>
   >([]);
   const [videoCount, setVideoCount] = useState(0); // finished Wan clips
-  // ---- travel show
-  const [rips, setRips] = useState<
-    Array<{ id: number; month: string; year: number; z: number }>
-  >([]);
-  const [decades, setDecades] = useState<Array<{ id: number; label: string }>>([]);
   const [loadTick, setLoadTick] = useState(0); // rotates the travel loading lines
   const [total, setTotal] = useState(0);
   const [cursor, setCursor] = useState(0);
@@ -198,13 +135,10 @@ export default function Home() {
   const finalBlobRef = useRef<Blob | null>(null); // stitched mp4 for Web Share
   const videoElsRef = useRef<Record<number, HTMLVideoElement | null>>({}); // slide clips
   const travelT0Ref = useRef(0); // when travel began (loading lines + reveal cap)
-  // Travel show: tear-off calendar pages, decade fly-bys, warp canvas.
-  const ripIdRef = useRef(0);
-  const ripLastRef = useRef(0);
-  const prevMonthKeyRef = useRef(-1);
-  const prevDecadeRef = useRef(-1);
-  const warpRef = useRef<HTMLCanvasElement | null>(null);
-  const warpSpeedRef = useRef(0); // eased travel progress, read by the warp rAF loop
+  // Travel show: the polaroid memory tunnel, drawn on one canvas.
+  const tunnelRef = useRef<HTMLCanvasElement | null>(null);
+  const warpSpeedRef = useRef(0); // eased travel progress, read by the tunnel rAF loop
+  const curYearRef = useRef(new Date().getFullYear()); // year the rewind is passing
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const arrivalRef = useRef<{ from: number; t0: number; rampMs: number } | null>(null);
   const revealFiredRef = useRef(false);
@@ -767,10 +701,8 @@ export default function Home() {
     blobUrlsRef.current = [];
     finalBlobRef.current = null;
     videoElsRef.current = {};
-    ripLastRef.current = 0;
-    prevMonthKeyRef.current = -1;
-    prevDecadeRef.current = -1;
     warpSpeedRef.current = 0;
+    curYearRef.current = new Date().getFullYear();
     clipRefs.current = [];
     arrivalRef.current = null;
     revealFiredRef.current = false;
@@ -792,8 +724,6 @@ export default function Home() {
     setLiveDone(false);
     setVideoUrl("");
     setVideoCount(0);
-    setRips([]);
-    setDecades([]);
     setLoadTick(0);
     setShowShare(false);
     setToast("");
@@ -813,8 +743,8 @@ export default function Home() {
   const targetTime = new Date(fromYear - yearsBack, 5, 15).getTime();
   const curDate = new Date(Date.now() - (Date.now() - targetTime) * eased);
   const curYear = curDate.getFullYear();
-  const curMonthName = curDate.toLocaleDateString("en-US", { month: "long" }).toUpperCase();
-  warpSpeedRef.current = eased; // the warp canvas reads this every frame
+  warpSpeedRef.current = eased; // the tunnel canvas reads this every frame
+  curYearRef.current = curYear; // ...and matches polaroids to this year
   const travelStatus = travelP < 92 ? "Rewinding" : "Arriving";
   const cityTrim = city.trim();
   const cityLabel = cityTrim ? cityTrim.charAt(0).toUpperCase() + cityTrim.slice(1) : "your hometown";
@@ -840,56 +770,13 @@ export default function Home() {
   ];
   const loadLine = loadLines[loadTick % loadLines.length];
 
-  // Tear-off pages: whenever the rewind crosses into an earlier month, the
-  // page that was showing rips off and flutters away. One rip per tick,
-  // lightly throttled, so the fast mid-rewind reads as a flurry of pages.
-  const monthKey = curYear * 12 + curDate.getMonth();
-  useEffect(() => {
-    if (screen !== "travel") {
-      prevMonthKeyRef.current = -1;
-      return;
-    }
-    const prev = prevMonthKeyRef.current;
-    prevMonthKeyRef.current = monthKey;
-    if (prev === -1 || monthKey >= prev) return;
-    const now = Date.now();
-    if (now - ripLastRef.current < RIP_MIN_GAP_MS) return;
-    ripLastRef.current = now;
-    const id = ripIdRef.current++;
-    const rip = {
-      id,
-      month: new Date(Math.floor(prev / 12), prev % 12, 1)
-        .toLocaleDateString("en-US", { month: "long" })
-        .toUpperCase(),
-      year: Math.floor(prev / 12),
-      z: (id % 2 ? 1 : -1) * (6 + ((id * 7) % 12)), // per-page flutter direction
-    };
-    setRips((rs) => [...rs.slice(-(MAX_RIPS - 1)), rip]);
-    setTimeout(() => setRips((rs) => rs.filter((r) => r.id !== id)), RIP_MS + 80);
-  }, [screen, monthKey]);
-
-  // Decade fly-bys: crossing back into an earlier decade sends its label
-  // zooming past — the trip reads as decades, not just dates.
-  const curDecade = Math.floor(curYear / 10) * 10;
-  useEffect(() => {
-    if (screen !== "travel") {
-      prevDecadeRef.current = -1;
-      return;
-    }
-    const prev = prevDecadeRef.current;
-    prevDecadeRef.current = curDecade;
-    if (prev === -1 || curDecade >= prev) return;
-    const id = ripIdRef.current++;
-    setDecades((ds) => [...ds.slice(-2), { id, label: `${prev}s` }]);
-    setTimeout(() => setDecades((ds) => ds.filter((d) => d.id !== id)), 1800);
-  }, [screen, curDecade]);
-
-  // Warp streaks: particles racing outward from behind the calendar — the
-  // generic "falling back through time" tunnel. Speed follows the eased
-  // travel progress, so it drifts at first and hits warp with the rewind.
+  // The polaroid memory tunnel: real pop-culture photos fly past as
+  // polaroids, chosen to match the year the rewind is passing through
+  // (curYearRef). Everything happens inside one rAF loop on one canvas —
+  // zero React state per frame, so the travel screen stays smooth.
   useEffect(() => {
     if (screen !== "travel") return;
-    const canvas = warpRef.current;
+    const canvas = tunnelRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -899,38 +786,153 @@ export default function Home() {
     canvas.height = h * dpr;
     ctx.scale(dpr, dpr);
     const cx = w / 2;
-    const cy = h * 0.42;
-    const maxR = Math.hypot(cx, cy) + 40;
-    const stars = Array.from({ length: 110 }, () => ({
-      a: Math.random() * Math.PI * 2,
-      r: Math.pow(Math.random(), 0.6) * maxR,
-      w: 0.4 + Math.random() * 1.1,
-    }));
-    let raf = 0;
-    const step = () => {
-      ctx.clearRect(0, 0, w, h);
-      const sp = 0.1 + warpSpeedRef.current * 1.2;
-      for (const s of stars) {
-        const v = (0.35 + s.r * 0.012) * sp * 6;
-        const r2 = s.r + v;
-        const alpha = Math.min(0.5, 0.1 + (s.r / maxR) * 0.45) * Math.min(1, sp * 2);
-        ctx.strokeStyle = `rgba(240, 214, 180, ${alpha})`;
-        ctx.lineWidth = s.w;
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(s.a) * s.r, cy + Math.sin(s.a) * s.r);
-        ctx.lineTo(cx + Math.cos(s.a) * r2, cy + Math.sin(s.a) * r2);
-        ctx.stroke();
-        if (r2 > maxR) {
-          s.r = Math.random() * 30;
-          s.a = Math.random() * Math.PI * 2;
-        } else {
-          s.r = r2;
+    const cy = h * 0.44;
+
+    type Sprite = {
+      ox: number; // world-space offset from the tunnel axis
+      oy: number;
+      z: number; // distance from camera; shrinks each frame
+      rot: number;
+      img: HTMLImageElement;
+      year: number;
+      label: string;
+    };
+    const FAR = 1500;
+    const sprites: Sprite[] = [];
+    const imgCache = new Map<string, HTMLImageElement>();
+    let manifest: PolaroidEntry[] = [];
+    let alive = true;
+    fetch("/polaroids/manifest.json")
+      .then((r) => r.json())
+      .then((m: PolaroidEntry[]) => {
+        if (!alive) return;
+        manifest = m;
+        // Warm the cache around the starting year so the first sprites
+        // aren't blank cards.
+        m.filter((e) => Math.abs(e.y - curYearRef.current) < 4).forEach((e) => loadImg(e.f));
+      })
+      .catch(() => {});
+
+    function loadImg(f: string): HTMLImageElement {
+      let im = imgCache.get(f);
+      if (!im) {
+        im = new Image();
+        im.src = `/polaroids/${f}`;
+        imgCache.set(f, im);
+      }
+      return im;
+    }
+
+    // Pick the not-recently-shown photo closest to the year the rewind is
+    // passing; jitter keeps the same two from strict alternation.
+    const used = new Set<number>();
+    let lastSpawn = 0;
+    function spawn() {
+      if (manifest.length === 0) return;
+      let best = -1;
+      let bestD = Infinity;
+      for (let i = 0; i < manifest.length; i++) {
+        if (used.has(i)) continue;
+        const d = Math.abs(manifest[i].y - curYearRef.current) + Math.random() * 2;
+        if (d < bestD) {
+          bestD = d;
+          best = i;
         }
+      }
+      if (best === -1) {
+        used.clear();
+        return;
+      }
+      used.add(best);
+      if (used.size > manifest.length - 8) used.clear();
+      const e = manifest[best];
+      const a = Math.random() * Math.PI * 2;
+      const r = 0.24 + Math.random() * 0.55;
+      sprites.push({
+        ox: Math.cos(a) * r * w * 1.15,
+        oy: Math.sin(a) * r * h * 0.62,
+        z: FAR,
+        rot: (Math.random() - 0.5) * 0.5,
+        img: loadImg(e.f),
+        year: e.y,
+        label: e.l,
+      });
+    }
+
+    let raf = 0;
+    let prev = performance.now();
+    const step = (now: number) => {
+      const dt = Math.min(50, now - prev) / 1000;
+      prev = now;
+      ctx.clearRect(0, 0, w, h);
+      const speed = 230 + warpSpeedRef.current * 560; // z units/s toward camera
+      const interval = 430 - warpSpeedRef.current * 200; // spawn cadence
+      if (now - lastSpawn > interval && sprites.length < 14) {
+        spawn();
+        lastSpawn = now;
+      }
+      sprites.sort((a, b) => b.z - a.z); // far first, near drawn on top
+      for (let i = sprites.length - 1; i >= 0; i--) {
+        const s = sprites[i];
+        s.z -= speed * dt;
+        if (s.z <= 50) {
+          sprites.splice(i, 1);
+          continue;
+        }
+        const persp = 330 / s.z;
+        const cw = 165 * persp; // polaroid card width on screen
+        if (cw < 9) continue;
+        const ch = cw * 1.22;
+        const x = cx + s.ox * persp;
+        const y = cy + s.oy * persp;
+        const fadeIn = Math.min(1, (FAR - s.z) / 320);
+        const fadeOut = Math.min(1, (s.z - 50) / 130);
+        ctx.globalAlpha = Math.min(fadeIn, fadeOut) * 0.96;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(s.rot);
+        // white card
+        ctx.fillStyle = "#faf6ec";
+        ctx.fillRect(-cw / 2, -ch / 2, cw, ch);
+        // photo (square, cover-cropped; images ship pre-cropped square)
+        const m = cw * 0.06;
+        const iw = cw - 2 * m;
+        if (s.img.complete && s.img.naturalWidth > 0) {
+          const nw = s.img.naturalWidth;
+          const nh = s.img.naturalHeight;
+          const side = Math.min(nw, nh);
+          ctx.drawImage(
+            s.img,
+            (nw - side) / 2,
+            (nh - side) / 2,
+            side,
+            side,
+            -cw / 2 + m,
+            -ch / 2 + m,
+            iw,
+            iw,
+          );
+        } else {
+          ctx.fillStyle = "#e2d8c6";
+          ctx.fillRect(-cw / 2 + m, -ch / 2 + m, iw, iw);
+        }
+        // handwritten-style caption on the bottom strip
+        if (cw > 78) {
+          ctx.fillStyle = "rgba(66,52,38,0.85)";
+          ctx.font = `italic ${Math.max(9, cw * 0.082)}px Georgia, serif`;
+          ctx.textAlign = "center";
+          ctx.fillText(`${s.label} · ${s.year}`, 0, cw * 0.565, cw * 0.9);
+        }
+        ctx.restore();
+        ctx.globalAlpha = 1;
       }
       raf = requestAnimationFrame(step);
     };
-    step();
-    return () => cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(step);
+    return () => {
+      alive = false;
+      cancelAnimationFrame(raf);
+    };
   }, [screen]);
 
   return (
@@ -1381,43 +1383,20 @@ export default function Home() {
               animation: "rcFade 0.8s ease both",
             }}
           >
-            {/* warp tunnel: streaks racing outward — falling back through
-                the decades, faster as the rewind accelerates */}
+            {/* the polaroid memory tunnel: real pop-culture photos of the
+                years the rewind is passing fly by as polaroids (one canvas,
+                no per-frame React) */}
             <canvas
-              ref={warpRef}
+              ref={tunnelRef}
               style={{
                 position: "absolute",
                 inset: 0,
                 width: "100%",
                 height: "100%",
-                zIndex: 0,
+                zIndex: 1,
                 pointerEvents: "none",
               }}
             />
-
-            {/* decade fly-bys: crossing into an earlier decade zooms its
-                label past the camera */}
-            {decades.map((d) => (
-              <div
-                key={d.id}
-                style={{
-                  position: "absolute",
-                  top: "42%",
-                  left: "50%",
-                  zIndex: 1,
-                  fontFamily: SERIF,
-                  fontWeight: 700,
-                  fontSize: 210,
-                  color: "rgba(240,214,180,0.10)",
-                  letterSpacing: -6,
-                  fontVariantNumeric: "tabular-nums",
-                  pointerEvents: "none",
-                  animation: "rcDecade 1.7s ease-out both",
-                }}
-              >
-                {d.label}
-              </div>
-            ))}
 
             {/* brightening wash as the arrival nears (bleeds into the veil) */}
             <div
@@ -1433,75 +1412,6 @@ export default function Home() {
               }}
             />
 
-            {/* the 3D tear-off calendar: the month showing rips away and
-                flutters off every time the rewind crosses into an earlier
-                month */}
-            <div
-              style={{
-                position: "relative",
-                zIndex: 2,
-                perspective: 900,
-                marginBottom: 22,
-              }}
-            >
-              <div
-                style={{
-                  position: "relative",
-                  width: 208,
-                  height: 244,
-                  transform: "rotateX(17deg)",
-                  transformStyle: "preserve-3d",
-                  filter: "drop-shadow(0 32px 30px rgba(0,0,0,0.55))",
-                }}
-              >
-                {/* spiral binding across the top */}
-                <div
-                  style={{
-                    position: "absolute",
-                    top: -9,
-                    left: 18,
-                    right: 18,
-                    display: "flex",
-                    justifyContent: "space-between",
-                    zIndex: 7,
-                    pointerEvents: "none",
-                  }}
-                >
-                  {Array.from({ length: 7 }, (_, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        width: 7,
-                        height: 17,
-                        borderRadius: 4,
-                        background: "linear-gradient(#e6e6e6, #7c7c7c)",
-                        boxShadow: "0 1px 1px rgba(0,0,0,0.4)",
-                      }}
-                    />
-                  ))}
-                </div>
-                {/* the page currently showing */}
-                <CalendarPage month={curMonthName} year={curYear} />
-                {/* pages mid-tear, folding down off the top edge */}
-                {rips.map((r) => (
-                  <div
-                    key={r.id}
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      zIndex: 8,
-                      transformOrigin: "top center",
-                      ["--rz" as string]: `${r.z}deg`,
-                      animation: "rcRip 0.75s cubic-bezier(0.42,0,0.72,1) both",
-                      pointerEvents: "none",
-                    } as React.CSSProperties}
-                  >
-                    <CalendarPage month={r.month} year={r.year} />
-                  </div>
-                ))}
-              </div>
-            </div>
-
             <div style={{ position: "relative", textAlign: "center", zIndex: 2 }}>
               <div
                 style={{
@@ -1516,10 +1426,24 @@ export default function Home() {
               </div>
               <div
                 style={{
+                  fontFamily: SERIF,
+                  fontSize: 96,
+                  lineHeight: 1,
+                  color: "#fff",
+                  letterSpacing: -2,
+                  margin: "10px 0 4px",
+                  fontVariantNumeric: "tabular-nums",
+                  textShadow: "0 0 46px rgba(255,235,205,0.45)",
+                }}
+              >
+                {curYear}
+              </div>
+              <div
+                style={{
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 14,
-                  marginTop: 14,
+                  marginTop: 8,
                   fontWeight: 400,
                   fontSize: 16,
                   color: "rgba(255,255,255,0.66)",
