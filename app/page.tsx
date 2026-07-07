@@ -41,6 +41,7 @@ const CONCURRENCY = 7;
 const CHILD_AGE = 7; // matches the POV age in the image/video prompts
 const USE_WAN = process.env.NEXT_PUBLIC_USE_WAN === "1"; // motion clips instead of stills
 const SLIDE_MS = 2000; // 7 slides × 2s = a 14s pass
+const TRAVEL_LOAD_MS = 80000;
 const SANS = "var(--font-sans), sans-serif";
 const SERIF = "var(--font-serif), serif";
 
@@ -48,6 +49,223 @@ const SERIF = "var(--font-serif), serif";
 // public/polaroids/) fly past as polaroids, matched to the year the rewind
 // is passing through. Drawn entirely on one canvas — no per-frame React.
 type PolaroidEntry = { y: number; l: string; f: string };
+type RecorderChoice = { mimeType: string; ext: "mp4" | "webm"; fileType: string };
+
+function inverseSmootherStep(v: number): number {
+  let lo = 0;
+  let hi = 1;
+  const target = Math.max(0, Math.min(1, v));
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    const eased = mid * mid * mid * (mid * (mid * 6 - 15) + 10);
+    if (eased < target) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+function rewindTimeForDateMs(startTime: number, targetTime: number, dateTime: number): number {
+  const span = Math.max(1, startTime - targetTime);
+  const easedAtDate = Math.max(0, Math.min(1, (startTime - dateTime) / span));
+  return inverseSmootherStep(easedAtDate) * TRAVEL_LOAD_MS;
+}
+
+function yearWindowMs(year: number, startTime: number, targetTime: number) {
+  const startYear = new Date(startTime).getFullYear();
+  const targetYear = new Date(targetTime).getFullYear();
+  const start =
+    year >= startYear
+      ? 0
+      : rewindTimeForDateMs(startTime, targetTime, new Date(year + 1, 0, 1).getTime());
+  const end =
+    year <= targetYear
+      ? TRAVEL_LOAD_MS
+      : rewindTimeForDateMs(startTime, targetTime, new Date(year, 0, 1).getTime());
+  return { start, end: Math.max(start + 1, end) };
+}
+
+function flashFractions(count: number): number[] {
+  if (count <= 0) return [];
+  if (count === 1) return [0.55];
+  if (count === 2) return [0.4, 0.8];
+  return Array.from({ length: count }, (_, i) => 0.25 + (0.65 * i) / Math.max(1, count - 1));
+}
+
+function pickRecorder(): RecorderChoice | null {
+  if (typeof MediaRecorder === "undefined") return null;
+  const choices: RecorderChoice[] = [
+    { mimeType: "video/mp4;codecs=avc1.42E01E,mp4a.40.2", ext: "mp4", fileType: "video/mp4" },
+    { mimeType: "video/mp4", ext: "mp4", fileType: "video/mp4" },
+    { mimeType: "video/webm;codecs=vp9,opus", ext: "webm", fileType: "video/webm" },
+    { mimeType: "video/webm;codecs=vp8,opus", ext: "webm", fileType: "video/webm" },
+    { mimeType: "video/webm", ext: "webm", fileType: "video/webm" },
+  ];
+  return choices.find((c) => MediaRecorder.isTypeSupported(c.mimeType)) ?? null;
+}
+
+function drawCover(ctx: CanvasRenderingContext2D, video: HTMLVideoElement, w: number, h: number) {
+  const vw = video.videoWidth || w;
+  const vh = video.videoHeight || h;
+  const scale = Math.max(w / vw, h / vh);
+  const dw = vw * scale;
+  const dh = vh * scale;
+  ctx.drawImage(video, (w - dw) / 2, (h - dh) / 2, dw, dh);
+}
+
+function drawPovText(ctx: CanvasRenderingContext2D, text: string, w: number, h: number) {
+  if (!text) return;
+  ctx.save();
+  ctx.font = "800 43px -apple-system, 'Helvetica Neue', Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = 9;
+  ctx.strokeStyle = "rgba(0,0,0,0.9)";
+  ctx.fillStyle = "#fff";
+  ctx.strokeText(text, w / 2, h * 0.11 + 42, w - 40);
+  ctx.fillText(text, w / 2, h * 0.11 + 42, w - 40);
+  ctx.restore();
+}
+
+async function loadVideoForRender(blob: Blob, urls: string[]): Promise<HTMLVideoElement> {
+  const url = URL.createObjectURL(blob);
+  urls.push(url);
+  const v = document.createElement("video");
+  v.src = url;
+  v.muted = true;
+  v.playsInline = true;
+  v.preload = "auto";
+  await new Promise<void>((resolve, reject) => {
+    const done = () => resolve();
+    v.addEventListener("loadedmetadata", done, { once: true });
+    v.addEventListener("error", () => reject(new Error("Clip could not be loaded")), { once: true });
+  });
+  return v;
+}
+
+async function seekStart(v: HTMLVideoElement) {
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      v.removeEventListener("seeked", done);
+      resolve();
+    };
+    v.addEventListener("seeked", done);
+    window.setTimeout(done, 350);
+    try {
+      v.currentTime = 0;
+    } catch {
+      done();
+    }
+  });
+}
+
+async function drawSegment(
+  ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+  video: HTMLVideoElement,
+  povText: string,
+) {
+  await seekStart(video);
+  await video.play().catch(() => {});
+  const started = performance.now();
+  await new Promise<void>((resolve) => {
+    const draw = () => {
+      const elapsed = performance.now() - started;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      drawCover(ctx, video, canvas.width, canvas.height);
+      drawPovText(ctx, povText, canvas.width, canvas.height);
+      if (elapsed >= SLIDE_MS) {
+        video.pause();
+        resolve();
+      } else {
+        requestAnimationFrame(draw);
+      }
+    };
+    draw();
+  });
+}
+
+async function renderFilmInBrowser(
+  clips: Blob[],
+  povText: string,
+  musicUrl: string,
+): Promise<{ blob: Blob; ext: "mp4" | "webm" }> {
+  const choice = pickRecorder();
+  if (!choice) throw new Error("No browser video recorder");
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 720;
+  canvas.height = 1280;
+  const ctx = canvas.getContext("2d");
+  const captureStream = canvas.captureStream?.bind(canvas);
+  if (!ctx || !captureStream) throw new Error("No canvas recorder");
+
+  const stream = captureStream(30);
+  let audioCtx: AudioContext | null = null;
+  let audioSrc: AudioBufferSourceNode | null = null;
+  try {
+    audioCtx = new AudioContext();
+    const music = await fetch(musicUrl).then((r) => r.arrayBuffer());
+    const audio = await audioCtx.decodeAudioData(music.slice(0));
+    const dest = audioCtx.createMediaStreamDestination();
+    audioSrc = audioCtx.createBufferSource();
+    audioSrc.buffer = audio;
+    audioSrc.connect(dest);
+    dest.stream.getAudioTracks().forEach((track) => stream.addTrack(track));
+    await audioCtx.resume().catch(() => {});
+  } catch {
+    audioCtx?.close().catch(() => {});
+    audioCtx = null;
+    audioSrc = null;
+  }
+
+  const tempUrls: string[] = [];
+  const videos = await Promise.all(clips.map((clip) => loadVideoForRender(clip, tempUrls)));
+  const chunks: Blob[] = [];
+  const recorder = new MediaRecorder(stream, {
+    mimeType: choice.mimeType,
+    videoBitsPerSecond: 4_000_000,
+    audioBitsPerSecond: 128_000,
+  });
+  const done = new Promise<Blob>((resolve, reject) => {
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+    recorder.onerror = () => reject(new Error("Browser recording failed"));
+    recorder.onstop = () => resolve(new Blob(chunks, { type: choice.fileType }));
+  });
+
+  recorder.start(250);
+  try {
+    audioSrc?.start();
+  } catch {
+    audioSrc = null;
+  }
+  let renderError: unknown = null;
+  try {
+    for (const video of videos) {
+      await drawSegment(ctx, canvas, video, povText);
+    }
+  } catch (err) {
+    renderError = err;
+  } finally {
+    try {
+      audioSrc?.stop();
+    } catch {}
+    videos.forEach((video) => video.pause());
+    stream.getTracks().forEach((track) => track.stop());
+    tempUrls.forEach((url) => URL.revokeObjectURL(url));
+    audioCtx?.close().catch(() => {});
+    if (recorder.state !== "inactive") recorder.stop();
+  }
+  const blob = await done;
+  if (renderError) throw renderError;
+  return { blob, ext: choice.ext };
+}
 
 // The POV line as a transparent 1080-wide PNG data URL for the ffmpeg
 // overlay — same TikTok look as the live element (bold white, thick black
@@ -125,6 +343,7 @@ export default function Home() {
   const [liveDone, setLiveDone] = useState(false);
   const [videoUrl, setVideoUrl] = useState(""); // stitched shareable mp4 (blob URL)
   const [showShare, setShowShare] = useState(false);
+  const [shareFailed, setShareFailed] = useState(false);
   const [toast, setToast] = useState("");
   const [muted, setMuted] = useState(false);
 
@@ -135,12 +354,16 @@ export default function Home() {
   const fileRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const blobUrlsRef = useRef<string[]>([]); // object URLs to revoke on restart
+  const clipBlobsRef = useRef<Record<number, Blob>>({}); // browser-held Wan clips for share export
   const finalBlobRef = useRef<Blob | null>(null); // stitched mp4 for Web Share
+  const finalFileExtRef = useRef<"mp4" | "webm">("mp4");
   const videoElsRef = useRef<Record<number, HTMLVideoElement | null>>({}); // slide clips
   const travelT0Ref = useRef(0); // when travel began (loading lines + reveal cap)
   // Travel show: the polaroid memory tunnel, drawn on one canvas.
   const tunnelRef = useRef<HTMLCanvasElement | null>(null);
   const warpSpeedRef = useRef(0); // eased travel progress, read by the tunnel rAF loop
+  const travelProgressRef = useRef(0); // raw progress, read by the memory-photo scheduler
+  const travelFromTimeRef = useRef(Date.now()); // fixed "today" for the rewind timeline
   const curYearRef = useRef(new Date().getFullYear()); // year the rewind is passing
   const povYearRef = useRef(0); // the childhood year the journey lands on
   const flyIdRef = useRef(0); // increments per flying memory
@@ -338,6 +561,7 @@ export default function Home() {
         let url = apiUrl;
         try {
           const blob = await (await fetch(apiUrl)).blob();
+          clipBlobsRef.current[i] = blob;
           url = URL.createObjectURL(blob);
           blobUrlsRef.current.push(url);
         } catch {}
@@ -388,6 +612,7 @@ export default function Home() {
       if (!r.ok) return false;
       const blob = await r.blob();
       if (runRef.current !== run) return false;
+      clipBlobsRef.current[i] = blob;
       const url = URL.createObjectURL(blob);
       blobUrlsRef.current.push(url);
       setPlaylist((prev) =>
@@ -437,6 +662,7 @@ export default function Home() {
     // curve of this progress, so it starts slow and speeds up.
     const t0 = Date.now();
     travelT0Ref.current = t0;
+    travelFromTimeRef.current = t0;
     travelTimer.current = setInterval(() => {
       if (runRef.current !== run) {
         if (travelTimer.current) clearInterval(travelTimer.current);
@@ -451,7 +677,7 @@ export default function Home() {
           reveal(run);
         }
       } else {
-        setTravelP((p) => Math.max(p, Math.min(97, ((Date.now() - t0) / 80000) * 100)));
+        setTravelP((p) => Math.max(p, Math.min(97, ((Date.now() - t0) / TRAVEL_LOAD_MS) * 100)));
       }
     }, 40);
 
@@ -475,6 +701,62 @@ export default function Home() {
         if (runRef.current === run) setVeil(0);
       }, 260);
     }, 700);
+  }
+
+  function setFinalShareBlob(blob: Blob, ext: "mp4" | "webm" = "mp4") {
+    finalBlobRef.current = blob;
+    finalFileExtRef.current = ext;
+    const url = URL.createObjectURL(blob);
+    blobUrlsRef.current.push(url);
+    setVideoUrl(url);
+    setShareFailed(false);
+  }
+
+  async function renderShareFilm(
+    run: number,
+    sessionId: string,
+    indices: number[],
+    povImage: string,
+    povText: string,
+  ): Promise<boolean> {
+    const clips = indices.map((index) => clipBlobsRef.current[index]);
+    if (clips.some((clip) => !clip)) return false;
+    const readyClips = clips as Blob[];
+
+    try {
+      const form = new FormData();
+      form.set("sessionId", sessionId);
+      form.set("indices", JSON.stringify(indices));
+      form.set("mode", "hybrid");
+      form.set("povImage", povImage);
+      indices.forEach((index, k) => {
+        form.append(`clip-${index}`, readyClips[k], `clip-${index}.mp4`);
+      });
+      const sr = await fetch("/api/stitch", { method: "POST", body: form });
+      const sd = await sr.json().catch(() => ({}));
+      if (!sr.ok) throw new Error(sd.error || "Stitch failed");
+      const blob = await fetch(sd.videoUrl).then((r) => {
+        if (!r.ok) throw new Error("Rendered film missing");
+        return r.blob();
+      });
+      if (runRef.current !== run) return false;
+      setFinalShareBlob(blob, "mp4");
+      return true;
+    } catch {}
+
+    try {
+      const rendered = await renderFilmInBrowser(
+        readyClips,
+        povText,
+        `/api/music?session=${encodeURIComponent(sessionId)}`,
+      );
+      if (runRef.current !== run) return false;
+      setFinalShareBlob(rendered.blob, rendered.ext);
+      return true;
+    } catch {
+      if (runRef.current === run) setShareFailed(true);
+      return false;
+    }
   }
 
   async function runPipeline(run: number, sessionId: string, prof: Profile, cityName: string) {
@@ -522,36 +804,9 @@ export default function Home() {
       // build has no drawtext filter.
       const povImage = renderPovPng(povText);
 
-      // A stitch failure only affects sharing — the live film keeps playing,
-      // so it must never surface as a full-screen error.
-      try {
-        const sr = await fetch("/api/stitch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId,
-            indices: ok,
-            mode: USE_WAN ? "clips" : "hybrid",
-            povImage,
-          }),
-        });
-        const sd = await sr.json();
-        if (!sr.ok) throw new Error(sd.error || "Stitch failed");
-        if (runRef.current !== run) return;
-        // Keep the mp4 as a blob: Web Share needs a File, and blob playback
-        // avoids a network hiccup on the legacy live → final swap.
-        let finalUrl: string = sd.videoUrl;
-        try {
-          const blob = await (await fetch(sd.videoUrl)).blob();
-          finalBlobRef.current = blob;
-          finalUrl = URL.createObjectURL(blob);
-          blobUrlsRef.current.push(finalUrl);
-        } catch {}
-        if (runRef.current !== run) return;
-        setVideoUrl(finalUrl);
-      } catch {
-        if (USE_WAN) throw new Error("The film couldn't be developed");
-      }
+      // A share-render failure only affects exporting — the live film keeps
+      // playing, so it must never surface as a full-screen error.
+      await renderShareFilm(run, sessionId, ok, povImage, povText);
     } catch (err: any) {
       if (runRef.current === run) setError(err?.message ?? "Something went wrong");
     }
@@ -581,14 +836,18 @@ export default function Home() {
         setLiveDone(true);
         setShowShare(true); // first full playthrough done — offer the share sheet
       }
-      if (!USE_WAN) setCursor(0);
+      musicRef.current?.pause();
+      const lastVideo = USE_WAN
+        ? clipRefs.current[playlist.length - 1]
+        : videoElsRef.current[playlist[playlist.length - 1]?.idx];
+      lastVideo?.pause();
     }
-    // While the next slide renders, the current one just keeps drifting —
-    // never a waiting popup; it has to feel live.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, playlist.length, cursor, genDone, liveDone]);
 
-  const finalMode = liveDone && Boolean(videoUrl); // legacy Wan mode swaps to the mp4
+  // The stitched file is for sharing only. The live film holds on its ended
+  // frame instead of swapping to an autoplaying background mp4.
+  const finalMode = false;
 
   // Slideshow driver: advance every two seconds while the next slide exists.
   // If generation falls behind, the current scene keeps drifting until the
@@ -607,6 +866,15 @@ export default function Home() {
   // pause the rest (seven looping videos would decode for nothing).
   useEffect(() => {
     if (USE_WAN || screen !== "film") return;
+    if (cursor >= playlist.length && genDone) {
+      playlist.forEach((p, i) => {
+        const v = videoElsRef.current[p.idx];
+        if (!v || i === playlist.length - 1) return;
+        v.pause();
+      });
+      videoElsRef.current[playlist[playlist.length - 1]?.idx]?.pause();
+      return;
+    }
     const shown = playlist.length > 0 ? Math.min(cursor, playlist.length - 1) : -1;
     playlist.forEach((p, i) => {
       const v = videoElsRef.current[p.idx];
@@ -638,12 +906,12 @@ export default function Home() {
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState !== "visible") return;
-      if (screen === "travel" || screen === "film") {
+      if (screen === "travel" || (screen === "film" && !liveDone)) {
         const m = musicRef.current;
         if (m && m.paused && m.src) m.play().catch(() => {});
       }
       if (screen !== "film") return;
-      if (USE_WAN) {
+      if (USE_WAN && !liveDone) {
         const v = finalMode ? filmRef.current : clipRefs.current[cursor];
         if (v && v.paused && !v.ended) v.play().catch(() => {});
       }
@@ -669,7 +937,9 @@ export default function Home() {
     }
     const blob = finalBlobRef.current;
     if (blob && typeof navigator.share === "function") {
-      const file = new File([blob], "relive-childhood.mp4", { type: "video/mp4" });
+      const file = new File([blob], `relive-childhood.${finalFileExtRef.current}`, {
+        type: blob.type || (finalFileExtRef.current === "mp4" ? "video/mp4" : "video/webm"),
+      });
       if (!navigator.canShare || navigator.canShare({ files: [file] })) {
         try {
           await navigator.share({ files: [file], title: "Relive Childhood" });
@@ -681,11 +951,37 @@ export default function Home() {
     }
     const a = document.createElement("a");
     a.href = videoUrl;
-    a.download = "relive-childhood.mp4";
+    a.download = `relive-childhood.${finalFileExtRef.current}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     showToast("Saved your film");
+  }
+
+  function watchAgain() {
+    setShowShare(false);
+    setLiveDone(false);
+    setCursor(0);
+    const m = musicRef.current;
+    if (m) {
+      m.currentTime = 0;
+      m.play().catch(() => {});
+    }
+    const final = filmRef.current;
+    if (final) {
+      final.currentTime = 0;
+      final.play().catch(() => {});
+    }
+    Object.values(videoElsRef.current).forEach((v) => {
+      if (!v) return;
+      v.pause();
+      v.currentTime = 0;
+    });
+    clipRefs.current.forEach((v) => {
+      if (!v) return;
+      v.pause();
+      v.currentTime = 0;
+    });
   }
 
   function toggleMute() {
@@ -703,7 +999,9 @@ export default function Home() {
     musicRef.current?.pause();
     blobUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
     blobUrlsRef.current = [];
+    clipBlobsRef.current = {};
     finalBlobRef.current = null;
+    finalFileExtRef.current = "mp4";
     videoElsRef.current = {};
     warpSpeedRef.current = 0;
     curYearRef.current = new Date().getFullYear();
@@ -730,6 +1028,7 @@ export default function Home() {
     setVideoCount(0);
     setFlyMems([]);
     setShowShare(false);
+    setShareFailed(false);
     setToast("");
     beginScan(runRef.current);
   }
@@ -744,11 +1043,13 @@ export default function Home() {
   // mid-June of the childhood year as it arrives.
   const tp = travelP / 100;
   const eased = tp * tp * tp * (tp * (tp * 6 - 15) + 10);
+  const travelFromTime = travelFromTimeRef.current || Date.now();
   const targetTime = new Date(fromYear - yearsBack, 5, 15).getTime();
-  const curDate = new Date(Date.now() - (Date.now() - targetTime) * eased);
+  const curDate = new Date(travelFromTime - (travelFromTime - targetTime) * eased);
   const curYear = curDate.getFullYear();
   const curMonth = curDate.toLocaleDateString("en-US", { month: "long" }).toUpperCase();
   warpSpeedRef.current = eased; // the tunnel canvas reads this every frame
+  travelProgressRef.current = travelP; // the photo scheduler reads this without React ticks
   curYearRef.current = curYear; // ...and matches polaroids to this year
   const cityTrim = city.trim();
   const cityValid = Boolean(cityTrim);
@@ -812,86 +1113,99 @@ export default function Home() {
   }, [screen]);
 
   // Memories flying by: real photos from the years the rewind is passing
-  // fly outward past the camera, several overlapping at once so the flow
-  // feels continuous (like the warp lines) rather than one-at-a-time cards.
-  // Each is a plain CSS transform/opacity animation — cheap even several at
-  // once — and spawn cadence tightens as the rewind accelerates.
+  // fly outward past the camera. Each year gets its photos spaced across the
+  // displayed year, so the first slow years breathe before flashes appear and
+  // later years naturally tighten as the rewind accelerates.
   useEffect(() => {
     if (screen !== "travel") return;
     let manifest: PolaroidEntry[] = [];
+    const byYear = new Map<number, number[]>();
     const cache = new Map<string, HTMLImageElement>();
-    const used = new Set<number>();
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let activeYear = Number.NaN;
+    let shownSlots = 0;
     // The image currently being waited on — kept stable across ticks so a
     // slow-loading photo isn't abandoned for a new pick every tick (that was
     // firing dozens of parallel fetches with almost none completing in time).
-    let pending: { idx: number; img: HTMLImageElement } | null = null;
-    fetch("/polaroids/manifest.json")
-      .then((r) => r.json())
-      .then((m: PolaroidEntry[]) => {
-        if (!alive) return;
-        manifest = m;
-        // Warm a few years around the start of the journey so the first
-        // flights don't stall on a cold fetch.
-        m.filter((e) => Math.abs(e.y - curYearRef.current) <= 2).forEach((e) => {
-          const src = `/polaroids/${e.f}`;
-          if (!cache.has(src)) {
-            const im = new Image();
-            im.src = src;
-            cache.set(src, im);
-          }
-        });
-      })
-      .catch(() => {});
-
-    const schedule = () => {
-      if (!alive) return;
-      const delay = 1150 - warpSpeedRef.current * 750; // tightens as the rewind speeds up
-      timer = setTimeout(tick, Math.max(260, delay));
-    };
-    const pickNext = (): boolean => {
-      // nearest not-recently-shown photo to the year being passed, bounded
-      // to this user's journey (today back to their childhood year)
-      const nowYear = new Date().getFullYear();
-      let best = -1;
-      let bestD = Infinity;
-      for (let i = 0; i < manifest.length; i++) {
-        if (used.has(i)) continue;
-        const y = manifest[i].y;
-        if (y < povYearRef.current || y > nowYear) continue;
-        const d = Math.abs(y - curYearRef.current) + Math.random() * 2;
-        if (d < bestD) {
-          bestD = d;
-          best = i;
-        }
-      }
-      if (best === -1) {
-        used.clear();
-        return false;
-      }
-      const src = `/polaroids/${manifest[best].f}`;
+    let pending: { idx: number; img: HTMLImageElement; year: number } | null = null;
+    const preload = (idx: number) => {
+      const src = `/polaroids/${manifest[idx].f}`;
       let im = cache.get(src);
       if (!im) {
         im = new Image();
         im.src = src;
         cache.set(src, im);
       }
-      pending = { idx: best, img: im };
-      return true;
+      return im;
+    };
+    const warmYear = (year: number) => {
+      [year + 1, year, year - 1].forEach((y) => byYear.get(y)?.forEach(preload));
+    };
+    fetch("/polaroids/manifest.json")
+      .then((r) => r.json())
+      .then((m: PolaroidEntry[]) => {
+        if (!alive) return;
+        manifest = m;
+        m.forEach((e, i) => {
+          const list = byYear.get(e.y) ?? [];
+          list.push(i);
+          byYear.set(e.y, list);
+        });
+        // Warm a few years around the start of the journey so the first
+        // flights don't stall on a cold fetch.
+        warmYear(curYearRef.current);
+      })
+      .catch(() => {});
+
+    const schedule = () => {
+      if (!alive) return;
+      let delay = pending ? 120 : 450;
+      const entries = byYear.get(curYearRef.current) ?? [];
+      if (!pending && entries.length > 0 && shownSlots < entries.length) {
+        const targetTime = new Date(fromYear - yearsBack, 5, 15).getTime();
+        const win = yearWindowMs(curYearRef.current, travelFromTimeRef.current, targetTime);
+        const fractions = flashFractions(entries.length);
+        const virtualNow = (travelProgressRef.current / 100) * TRAVEL_LOAD_MS;
+        const dueAt = win.start + (win.end - win.start) * fractions[shownSlots];
+        delay = Math.max(90, Math.min(600, dueAt - virtualNow));
+      }
+      timer = setTimeout(tick, delay);
     };
     const tick = () => {
       if (!alive || manifest.length === 0) return schedule();
-      if (!pending && !pickNext()) return schedule();
+      const year = curYearRef.current;
+      if (year !== activeYear) {
+        activeYear = year;
+        shownSlots = 0;
+        pending = null;
+        warmYear(year);
+      }
+      const entries = byYear.get(year) ?? [];
+      if (entries.length === 0) return schedule();
+      const targetTime = new Date(fromYear - yearsBack, 5, 15).getTime();
+      const win = yearWindowMs(year, travelFromTimeRef.current, targetTime);
+      const fractions = flashFractions(entries.length);
+      const virtualNow = (travelProgressRef.current / 100) * TRAVEL_LOAD_MS;
+      const yearDuration = win.end - win.start;
+      const due = shownSlots < entries.length && virtualNow >= win.start + yearDuration * fractions[shownSlots];
+      if (!pending && due) {
+        const idx = entries[shownSlots];
+        pending = { idx, img: preload(idx), year };
+      }
+      if (!pending) return schedule();
       const p = pending!;
+      if (p.year !== year) {
+        pending = null;
+        return schedule();
+      }
       if (!(p.img.complete && p.img.naturalWidth > 0)) return schedule(); // keep waiting on the same image
-      used.add(p.idx);
-      if (used.size > manifest.length - 6) used.clear();
       const a = Math.random() * Math.PI * 2;
       setFlyMems((fm) => [
         ...fm.slice(-3),
         { id: flyIdRef.current++, src: p.img.src, dx: Math.cos(a), dy: Math.sin(a) * 0.65 },
       ]);
+      shownSlots++;
       pending = null;
       schedule();
     };
@@ -1498,20 +1812,11 @@ export default function Home() {
                     ref={filmRef}
                     key="final"
                     src={videoUrl}
-                    autoPlay
                     muted
                     playsInline
                     onEnded={() => {
-                      const v = filmRef.current;
-                      if (v) {
-                        v.currentTime = 0;
-                        v.play().catch(() => {});
-                      }
-                      const m = musicRef.current;
-                      if (m) {
-                        m.currentTime = 0;
-                        m.play().catch(() => {});
-                      }
+                      filmRef.current?.pause();
+                      musicRef.current?.pause();
                     }}
                     style={{ ...FULL_BLEED, zIndex: 3 }}
                   />
@@ -1666,7 +1971,9 @@ export default function Home() {
                   >
                     {videoUrl
                       ? "Save it to your camera roll or send it to someone who was there."
-                      : "Your film is still developing — the button lights up when it's ready."}
+                      : shareFailed
+                        ? "The share export couldn't finish here. You can still watch the film again."
+                        : "Your film is still developing — the button lights up when it's ready."}
                   </div>
                   <button
                     onClick={shareFilm}
@@ -1694,7 +2001,7 @@ export default function Home() {
                     Share film
                   </button>
                   <button
-                    onClick={restart}
+                    onClick={watchAgain}
                     style={{
                       marginTop: 10,
                       width: "100%",
@@ -1709,10 +2016,10 @@ export default function Home() {
                       background: "rgba(255,255,255,0.06)",
                     }}
                   >
-                    Start over
+                    Watch again
                   </button>
                   <button
-                    onClick={() => setShowShare(false)}
+                    onClick={restart}
                     style={{
                       marginTop: 4,
                       width: "100%",
@@ -1726,7 +2033,7 @@ export default function Home() {
                       fontSize: 13,
                     }}
                   >
-                    Keep watching
+                    Start over
                   </button>
                 </div>
               </div>
