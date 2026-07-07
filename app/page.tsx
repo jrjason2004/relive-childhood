@@ -42,6 +42,7 @@ const CHILD_AGE = 7; // matches the POV age in the image/video prompts
 const USE_WAN = process.env.NEXT_PUBLIC_USE_WAN === "1"; // motion clips instead of stills
 const SLIDE_MS = 2000; // 7 slides × 2s = a 14s pass
 const TRAVEL_LOAD_MS = 80000;
+const DATE_REWIND_LINEAR_WEIGHT = 0.45;
 const SANS = "var(--font-sans), sans-serif";
 const SERIF = "var(--font-serif), serif";
 
@@ -51,13 +52,24 @@ const SERIF = "var(--font-serif), serif";
 type PolaroidEntry = { y: number; l: string; f: string };
 type RecorderChoice = { mimeType: string; ext: "mp4" | "webm"; fileType: string };
 
-function inverseSmootherStep(v: number): number {
+function smootherStep(t: number): number {
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+function travelDateEase(t: number): number {
+  const p = Math.max(0, Math.min(1, t));
+  // A pure smootherstep sits on the current month/year too long. Blend in a
+  // modest linear floor so the rewind visibly starts, then keeps accelerating.
+  return DATE_REWIND_LINEAR_WEIGHT * p + (1 - DATE_REWIND_LINEAR_WEIGHT) * smootherStep(p);
+}
+
+function inverseTravelDateEase(v: number): number {
   let lo = 0;
   let hi = 1;
   const target = Math.max(0, Math.min(1, v));
   for (let i = 0; i < 24; i++) {
     const mid = (lo + hi) / 2;
-    const eased = mid * mid * mid * (mid * (mid * 6 - 15) + 10);
+    const eased = travelDateEase(mid);
     if (eased < target) lo = mid;
     else hi = mid;
   }
@@ -67,7 +79,7 @@ function inverseSmootherStep(v: number): number {
 function rewindTimeForDateMs(startTime: number, targetTime: number, dateTime: number): number {
   const span = Math.max(1, startTime - targetTime);
   const easedAtDate = Math.max(0, Math.min(1, (startTime - dateTime) / span));
-  return inverseSmootherStep(easedAtDate) * TRAVEL_LOAD_MS;
+  return inverseTravelDateEase(easedAtDate) * TRAVEL_LOAD_MS;
 }
 
 function yearWindowMs(year: number, startTime: number, targetTime: number) {
@@ -1038,11 +1050,10 @@ export default function Home() {
   const scanning = screen === "scan" && !locked;
   const scanStatus = scanP < 34 ? "Locating face" : scanP < 70 ? "Mapping features" : "Estimating age";
 
-  // Date rewind: quintic ease-in-out of the travel progress. Days flip slowly
-  // at first, then the rewind accelerates through the years and settles onto
-  // mid-June of the childhood year as it arrives.
+  // Date rewind: starts with enough motion to clearly leave the present, then
+  // accelerates through the years and settles onto mid-June of childhood.
   const tp = travelP / 100;
-  const eased = tp * tp * tp * (tp * (tp * 6 - 15) + 10);
+  const eased = travelDateEase(tp);
   const travelFromTime = travelFromTimeRef.current || Date.now();
   const targetTime = new Date(fromYear - yearsBack, 5, 15).getTime();
   const curDate = new Date(travelFromTime - (travelFromTime - targetTime) * eased);

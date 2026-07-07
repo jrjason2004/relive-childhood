@@ -89,14 +89,23 @@ export async function researchMoments(profile: Profile, city: string): Promise<M
   const prompt = `You are a nostalgia researcher. A person who appears ${gender}, around ${ageYears} years old, grew up in ${city}.
 Their core childhood years were roughly ${childhoodSpan}.
 
-Find SEVEN hyper-specific, niche nostalgic things from growing up in ${city} during that exact window.
-Lean toward what someone of that apparent gender, in that place and era, would most likely have loved (toys, shows, games, hobbies, brands) — make a confident best guess without being stereotypical or exclusionary. Make all 7 distinct.
+Find SEVEN hyper-specific, niche nostalgic childhood activities from growing up in ${city} during that exact window.
+Each moment must combine BOTH:
+1. a verified, unmistakable ${city} anchor, AND
+2. a tactile nostalgic kid activity, object, ritual, game, treat, toy, show, sport, hobby, or brand from ${childhoodSpan}.
+The local place is the stage; the nostalgic childhood action is the scene. Do not make static sightseeing shots where the viewer is merely looking at a landmark.
+Lean toward what someone of that apparent gender, in that place and era, would most likely have loved — make a confident best guess without being stereotypical or exclusionary. Make all 7 distinct.
 Frame every moment so it plausibly happens during SUMMER VACATION — no school-day scenes (no classrooms, no recess, no school buses). Order the 7 in the order they would unfold across one packed summer day, morning to evening.
 
 NON-NEGOTIABLE — every single one of the 7 must be UNMISTAKABLY ANCHORED TO ${city}. A viewer from ${city} should think "that's OUR town," not "that's any town." Generic anywhere-in-America scenes (a nameless backyard, a nameless cul-de-sac, a nameless pool) are NOT acceptable for any of the 7. Anchor each one with things like:
 - a REAL local landmark, store, mall, restaurant, arcade, pool, park, or annual town event specific to ${city} (named)
 - real named neighborhoods, streets, regional chains, local geography/skyline, the local minor-league or pro team, the local water park or county fair
-- a moment that fuses a verified local place WITH an era fad (e.g. trading Pokémon cards outside a specific named local diner)
+- a moment that fuses a verified local place WITH an era fad or childhood ritual (e.g. trading Pokémon cards outside a specific named local diner, counting arcade tickets at a verified local arcade, eating a local ballpark snack while wearing the home team's cap)
+
+NOSTALGIC ACTION REQUIREMENT — every moment must show the child DOING something era-specific inside or immediately around the local anchor:
+- Good: gripping arcade tokens at a named local arcade while friends crowd around a cabinet; carrying a melting regional ice cream cone at a named park; choosing a VHS/game rental at a verified local video store; clutching pool wristbands and concession-stand fries at a named public pool; trading cards on the curb outside a named local restaurant; holding a souvenir cup at a local minor-league game.
+- Bad: standing in front of a sign, looking at a skyline, walking past a storefront, generic kids playing with no local marker, a landmark postcard shot with no childhood activity.
+- The activity must be visible in the composition through hands, props, friends, adults, signage, counters, tickets, trays, wristbands, bikes, toys, games, snacks, or uniforms that match ${childhoodSpan}.
 
 CRITICAL — era accuracy for real places. This person will instantly notice an anachronism:
 - Before naming ANY real landmark, store, mall, restaurant, arcade, park, or event, verify with search that it existed AND was open to the public during ${childhoodSpan}. Check the opening date. Something that opened even a year after that window is disqualified, no matter how iconic it is today.
@@ -106,11 +115,11 @@ CRITICAL — era accuracy for real places. This person will instantly notice an 
 
 For each of the 7, return:
 - "title": short punchy name
-- "description": 1-2 sentences on what it is and why it's nostalgic for this place + era
-- "imagePrompt": a SIMPLE, true first-person POV photo from the eyes of a YOUNG CHILD, around 7 years old. The vantage point is LOW — at a small child's height — looking out and slightly up at the moment: other young children the same age, taller grown-ups, and the real place around them. The location anchor must be VISIBLE in the frame (the actual signage, storefront, landmark, or unmistakable local setting — name it in the prompt). The viewer is a little kid living and walking through it, not staring at an object. Their own SMALL child's hands (${skinTone} skin tone, little kid hands) may appear naturally at the edge of the frame, but keep the focus on the surroundings and the other young kids. Do not show the viewer's face. State explicitly that the scene is set in ${childhoodSpan} so every detail (signage, cars, clothes, devices) matches those years. Warm nostalgic film look, era-accurate details, 9:16 vertical.
-- "videoPrompt": how this still comes alive as a 4-second clip — subtle, realistic motion from the low child's-eye view: a gentle walk-forward or look-around, other young children moving naturally. No scene cuts.
+- "description": 1-2 sentences on the specific childhood activity and why doing it at this local place was nostalgic for this place + era
+- "imagePrompt": a SIMPLE, true first-person POV photo from the eyes of a YOUNG CHILD, around 7 years old, actively doing the nostalgic activity at the verified ${city} anchor. The vantage point is LOW — at a small child's height — looking out and slightly up at the moment: the child's small hands (${skinTone} skin tone) should naturally hold or reach for the era-specific prop, snack, ticket, toy, game, bike handlebar, tray, wristband, or other activity object. Other young children the same age, taller grown-ups, and the real place must surround the action. The location anchor must be VISIBLE in the frame (the actual signage, storefront, landmark, scoreboard, counter, entrance, ride, court, pool, or unmistakable local setting — name it in the prompt). The viewer is a little kid participating in a memory, not staring at a building or isolated object. Do not show the viewer's face. State explicitly that the scene is set in ${childhoodSpan} so every detail (signage, cars, clothes, devices, toys, games, food packaging) matches those years. Warm nostalgic film look, era-accurate details, 9:16 vertical.
+- "videoPrompt": how this still comes alive as a 4-second clip — subtle, realistic motion from the low child's-eye view while the kid continues the nostalgic activity: hands move, friends shift, an arcade screen flickers, a snack drips, tickets flutter, a ball rolls, a bike coasts, or the child gently walks forward. Keep the verified local anchor visible. No scene cuts.
 - "referenceQuery": the best Google Images search query to retrieve REAL photos of the specific landmark/object/place named (be specific, include city + era if helpful).
-- "kind": "place" if the moment centers on a NAMED real location (landmark, store, mall, restaurant, arcade, park, event venue) whose real archival photos would be findable on Google Images; "generic" for era-typical scenes not tied to one named location.
+- "kind": "place" for every object. All 7 moments must center on a NAMED real local location, event venue, park, store, arcade, restaurant, mall, pool, street, neighborhood, team venue, or landmark whose real archival photos would be findable on Google Images.
 
 Return ONLY valid JSON, an array of exactly 7 objects with those keys. No markdown, no commentary.`;
 
@@ -177,7 +186,7 @@ export async function generateImage(
 
   const fullPrompt = `${imagePrompt}
 
-True first-person POV from the eyes of a YOUNG CHILD around 7 years old: a LOW, small-child vantage looking out and slightly up at the scene, other young kids the same age, and grown-ups who tower above. Any visible hands are a little kid's small hands and must not dominate — keep the focus on the surroundings and people. Do not show the viewer's face. Use the reference photos only to depict the real place accurately. Warm nostalgic photographic 9:16 vertical. No text or watermarks.`;
+True first-person POV from the eyes of a YOUNG CHILD around 7 years old: a LOW, small-child vantage looking out and slightly up at the scene, other young kids the same age, and grown-ups who tower above. The child must be actively doing the nostalgic activity named in the prompt at the real local place: small hands should naturally hold, reach for, carry, trade, play with, eat, steer, or touch the era-specific prop, snack, ticket, toy, game, bike, tray, wristband, or object that makes the memory feel lived-in. Do not make a static landmark or storefront shot. Keep the verified local anchor visible in the surroundings while the childhood action remains clear. Do not show the viewer's face. Use the reference photos only to depict the real place accurately. Warm nostalgic photographic 9:16 vertical. No text or watermarks.`;
 
   const parts: any[] = [{ text: fullPrompt }];
   for (const r of refs) {
