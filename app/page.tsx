@@ -11,9 +11,9 @@
 // (the calendar show + rotating personalized loading lines carry the whole
 // wait), then the film plays start-to-finish as one continuous piece: each
 // 2s scene hard-cuts to the next, no crossfades, no mid-film loops or waits.
-// A TikTok-style "POV: Growing up in {year} {city}." line sits on the film, burned
+// A two-line TikTok-style "POV: Growing up in" / "{city}" line sits on the film, burned
 // into the shareable mp4 (ffmpeg stitch: clips + hard cuts + music + POV
-// text), offered via the share sheet after the first full pass. The film
+// text), offered via the share sheet once the export is ready. The film
 // screen itself never shows progress popups. Set NEXT_PUBLIC_USE_WAN=1 for
 // the legacy pure-clip path.
 
@@ -42,7 +42,6 @@ const CHILD_AGE = 7; // matches the POV age in the image/video prompts
 const USE_WAN = process.env.NEXT_PUBLIC_USE_WAN === "1"; // motion clips instead of stills
 const SLIDE_MS = 2000; // 7 slides × 2s = a 14s pass
 const TRAVEL_LOAD_MS = 80000;
-const DATE_REWIND_LINEAR_WEIGHT = 0.45;
 const SANS = "var(--font-sans), sans-serif";
 const SERIF = "var(--font-serif), serif";
 
@@ -58,9 +57,14 @@ function smootherStep(t: number): number {
 
 function travelDateEase(t: number): number {
   const p = Math.max(0, Math.min(1, t));
-  // A pure smootherstep sits on the current month/year too long. Blend in a
-  // modest linear floor so the rewind visibly starts, then keeps accelerating.
-  return DATE_REWIND_LINEAR_WEIGHT * p + (1 - DATE_REWIND_LINEAR_WEIGHT) * smootherStep(p);
+  // Fast launch, soft landing: the rewind should immediately feel like time
+  // travel, then slow down as it arrives in childhood.
+  return 1 - (1 - p) * (1 - p);
+}
+
+function travelWarpSpeed(t: number): number {
+  const p = Math.max(0, Math.min(1, t));
+  return 1 - smootherStep(p);
 }
 
 function inverseTravelDateEase(v: number): number {
@@ -98,9 +102,9 @@ function yearWindowMs(year: number, startTime: number, targetTime: number) {
 
 function flashFractions(count: number): number[] {
   if (count <= 0) return [];
-  if (count === 1) return [0.55];
-  if (count === 2) return [0.4, 0.8];
-  return Array.from({ length: count }, (_, i) => 0.25 + (0.65 * i) / Math.max(1, count - 1));
+  if (count === 1) return [0.35];
+  if (count === 2) return [0.22, 0.68];
+  return Array.from({ length: count }, (_, i) => 0.18 + (0.68 * i) / Math.max(1, count - 1));
 }
 
 function pickRecorder(): RecorderChoice | null {
@@ -122,21 +126,6 @@ function drawCover(ctx: CanvasRenderingContext2D, video: HTMLVideoElement, w: nu
   const dw = vw * scale;
   const dh = vh * scale;
   ctx.drawImage(video, (w - dw) / 2, (h - dh) / 2, dw, dh);
-}
-
-function drawPovText(ctx: CanvasRenderingContext2D, text: string, w: number, h: number) {
-  if (!text) return;
-  ctx.save();
-  ctx.font = "800 43px -apple-system, 'Helvetica Neue', Arial, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.lineJoin = "round";
-  ctx.lineWidth = 9;
-  ctx.strokeStyle = "rgba(0,0,0,0.9)";
-  ctx.fillStyle = "#fff";
-  ctx.strokeText(text, w / 2, h * 0.11 + 42, w - 40);
-  ctx.fillText(text, w / 2, h * 0.11 + 42, w - 40);
-  ctx.restore();
 }
 
 async function loadVideoForRender(blob: Blob, urls: string[]): Promise<HTMLVideoElement> {
@@ -279,25 +268,58 @@ async function renderFilmInBrowser(
   return { blob, ext: choice.ext };
 }
 
+const POV_PREFIX = "POV: Growing up in";
+
+function cityOnly(value: string): string {
+  const raw = value.split(",")[0].trim();
+  return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : "";
+}
+
+function povTextForCity(value: string): string {
+  const cleaned = cityOnly(value);
+  return cleaned ? `${POV_PREFIX}\n${cleaned}` : "";
+}
+
+function drawPovText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  w: number,
+  h: number,
+  top = h * 0.11,
+) {
+  const lines = text.split("\n").filter(Boolean);
+  if (lines.length === 0) return;
+  const fontSize = w * 0.06;
+  const lineHeight = fontSize * 1.08;
+  ctx.save();
+  ctx.font = `800 ${fontSize}px -apple-system, 'Helvetica Neue', Arial, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = fontSize * 0.22;
+  ctx.strokeStyle = "rgba(0,0,0,0.9)";
+  ctx.fillStyle = "#fff";
+  lines.forEach((line, i) => {
+    const y = top + lineHeight / 2 + i * lineHeight;
+    ctx.strokeText(line, w / 2, y, w - fontSize * 0.75);
+    ctx.fillText(line, w / 2, y, w - fontSize * 0.75);
+  });
+  ctx.restore();
+}
+
 // The POV line as a transparent 1080-wide PNG data URL for the ffmpeg
-// overlay — same TikTok look as the live element (bold white, thick black
-// stroke).
+// overlay — same two-line TikTok look as the live element.
 function renderPovPng(text: string): string {
   try {
+    const lines = text.split("\n").filter(Boolean);
+    if (lines.length === 0) return "";
     const c = document.createElement("canvas");
     c.width = 1080;
-    c.height = 160;
+    const fontSize = c.width * 0.06;
+    c.height = Math.ceil(fontSize * 1.08 * lines.length + fontSize * 0.45);
     const x = c.getContext("2d");
     if (!x) return "";
-    x.font = "800 64px -apple-system, 'Helvetica Neue', Arial, sans-serif";
-    x.textAlign = "center";
-    x.textBaseline = "middle";
-    x.lineJoin = "round";
-    x.lineWidth = 14;
-    x.strokeStyle = "rgba(0,0,0,0.9)";
-    x.strokeText(text, 540, 80, 1020);
-    x.fillStyle = "#fff";
-    x.fillText(text, 540, 80, 1020);
+    drawPovText(x, text, c.width, c.height, fontSize * 0.2);
     return c.toDataURL("image/png");
   } catch {
     return "";
@@ -369,6 +391,7 @@ export default function Home() {
   const clipBlobsRef = useRef<Record<number, Blob>>({}); // browser-held Wan clips for share export
   const finalBlobRef = useRef<Blob | null>(null); // stitched mp4 for Web Share
   const finalFileExtRef = useRef<"mp4" | "webm">("mp4");
+  const shareAutoOpenedRef = useRef(false);
   const videoElsRef = useRef<Record<number, HTMLVideoElement | null>>({}); // slide clips
   const travelT0Ref = useRef(0); // when travel began (loading lines + reveal cap)
   // Travel show: the polaroid memory tunnel, drawn on one canvas.
@@ -808,9 +831,7 @@ export default function Home() {
 
       // Every index in `ok` has a rendered Wan clip (buildSlide resolves only
       // after the clip lands), so the stitched mp4 is video-only too.
-      const birthYear = new Date().getFullYear() - prof.ageYears;
-      const povCity = cityName.split(",")[0].trim();
-      const povText = `POV: Growing up in ${birthYear + 7} ${povCity.charAt(0).toUpperCase() + povCity.slice(1)}.`;
+      const povText = povTextForCity(cityName);
       // Render the POV line to a transparent PNG for the stitch overlay —
       // canvas text matches the live overlay exactly, and the local ffmpeg
       // build has no drawtext filter.
@@ -846,7 +867,6 @@ export default function Home() {
     if (genDone && playlist.length > 0) {
       if (!liveDone) {
         setLiveDone(true);
-        setShowShare(true); // first full playthrough done — offer the share sheet
       }
       musicRef.current?.pause();
       const lastVideo = USE_WAN
@@ -932,6 +952,12 @@ export default function Home() {
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [screen, cursor, finalMode]);
 
+  useEffect(() => {
+    if (screen !== "film" || !liveDone || !videoUrl || shareAutoOpenedRef.current) return;
+    shareAutoOpenedRef.current = true;
+    setShowShare(true);
+  }, [screen, liveDone, videoUrl]);
+
   // ================= menu actions =================
 
   function showToast(msg: string) {
@@ -944,7 +970,7 @@ export default function Home() {
   // Desktop / no Web Share: plain download.
   async function shareFilm() {
     if (!videoUrl) {
-      showToast("Still developing — one moment");
+      showToast("Getting your share video ready");
       return;
     }
     const blob = finalBlobRef.current;
@@ -968,6 +994,14 @@ export default function Home() {
     a.click();
     a.remove();
     showToast("Saved your film");
+  }
+
+  function openShare() {
+    if (videoUrl || shareFailed) {
+      setShowShare(true);
+      return;
+    }
+    showToast("Getting your share video ready");
   }
 
   function watchAgain() {
@@ -1014,6 +1048,7 @@ export default function Home() {
     clipBlobsRef.current = {};
     finalBlobRef.current = null;
     finalFileExtRef.current = "mp4";
+    shareAutoOpenedRef.current = false;
     videoElsRef.current = {};
     warpSpeedRef.current = 0;
     curYearRef.current = new Date().getFullYear();
@@ -1050,8 +1085,8 @@ export default function Home() {
   const scanning = screen === "scan" && !locked;
   const scanStatus = scanP < 34 ? "Locating face" : scanP < 70 ? "Mapping features" : "Estimating age";
 
-  // Date rewind: starts with enough motion to clearly leave the present, then
-  // accelerates through the years and settles onto mid-June of childhood.
+  // Date rewind: launches fast so time travel is obvious immediately, then
+  // slows down as it settles onto mid-June of childhood.
   const tp = travelP / 100;
   const eased = travelDateEase(tp);
   const travelFromTime = travelFromTimeRef.current || Date.now();
@@ -1059,23 +1094,21 @@ export default function Home() {
   const curDate = new Date(travelFromTime - (travelFromTime - targetTime) * eased);
   const curYear = curDate.getFullYear();
   const curMonth = curDate.toLocaleDateString("en-US", { month: "long" }).toUpperCase();
-  warpSpeedRef.current = eased; // the tunnel canvas reads this every frame
+  warpSpeedRef.current = travelWarpSpeed(tp); // the tunnel canvas reads this every frame
   travelProgressRef.current = travelP; // the photo scheduler reads this without React ticks
   curYearRef.current = curYear; // ...and matches polaroids to this year
   const cityTrim = city.trim();
   const cityValid = Boolean(cityTrim);
   const showMirror = screen === "scan" || screen === "city" || screen === "travel";
 
-  // TikTok-style overlay: "POV: Growing up in 2007 Brambleton." — city as
-  // typed (before any comma), the childhood year the countdown lands on.
-  const povCityRaw = cityTrim.split(",")[0].trim();
-  const povCity = povCityRaw ? povCityRaw.charAt(0).toUpperCase() + povCityRaw.slice(1) : "";
+  // TikTok-style overlay: city only, split across two lines. Any typed state
+  // or country after a comma is deliberately dropped.
   const povYear = fromYear - yearsBack;
   povYearRef.current = povYear; // tunnel polaroids never go past this year
-  const povLine = povCity ? `POV: Growing up in ${povYear} ${povCity}.` : "";
+  const povLine = povTextForCity(cityTrim);
 
   // The time tunnel: light streaks racing outward past the camera, speed
-  // tied to the eased rewind progress. Pure lines on one canvas — the
+  // starts high and eases down with the rewind. Pure lines on one canvas — the
   // cheapest possible per-frame work.
   useEffect(() => {
     if (screen !== "travel") return;
@@ -1091,24 +1124,24 @@ export default function Home() {
     const cx = w / 2;
     const cy = h * 0.44;
     const maxR = Math.hypot(cx, cy) + 40;
-    const stars = Array.from({ length: 90 }, () => ({
+    const stars = Array.from({ length: 115 }, () => ({
       a: Math.random() * Math.PI * 2,
       r: Math.pow(Math.random(), 0.6) * maxR,
-      w: 0.4 + Math.random() * 1.2,
+      w: 0.7 + Math.random() * 1.7,
     }));
     let raf = 0;
     const step = () => {
       ctx.clearRect(0, 0, w, h);
-      const sp = 0.16 + warpSpeedRef.current * 1.2;
+      const sp = 0.24 + warpSpeedRef.current * 1.35;
       for (const s of stars) {
-        const v = (0.35 + s.r * 0.012) * sp * 6;
+        const v = (0.55 + s.r * 0.014) * sp * 7;
         const r2 = s.r + v;
-        const alpha = Math.min(0.55, 0.12 + (s.r / maxR) * 0.45) * Math.min(1, sp * 2);
-        ctx.strokeStyle = `rgba(240, 214, 180, ${alpha})`;
+        const alpha = Math.min(0.82, 0.2 + (s.r / maxR) * 0.62) * Math.min(1, sp * 2.4);
+        ctx.strokeStyle = `rgba(255, 236, 205, ${alpha})`;
         ctx.lineWidth = s.w;
         ctx.beginPath();
         ctx.moveTo(cx + Math.cos(s.a) * s.r, cy + Math.sin(s.a) * s.r);
-        ctx.lineTo(cx + Math.cos(s.a) * r2, cy + Math.sin(s.a) * r2);
+        ctx.lineTo(cx + Math.cos(s.a) * (r2 + v * 0.85), cy + Math.sin(s.a) * (r2 + v * 0.85));
         ctx.stroke();
         if (r2 > maxR) {
           s.r = Math.random() * 30;
@@ -1704,7 +1737,7 @@ export default function Home() {
                     position: "absolute",
                     top: "44%",
                     left: "50%",
-                    width: "58%",
+                    width: "50%",
                     aspectRatio: "1",
                     objectFit: "cover",
                     borderRadius: 8,
@@ -1849,14 +1882,17 @@ export default function Home() {
                   fontFamily: SANS,
                   fontWeight: 800,
                   fontSize: 27,
-                  letterSpacing: 0.2,
+                  lineHeight: 1.08,
+                  letterSpacing: 0,
                   color: "#fff",
                   textShadow:
                     "-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, 0 3px 0 #000, 0 6px 22px rgba(0,0,0,0.55)",
                   animation: "rcRise 0.9s ease both",
                 }}
               >
-                {povLine}
+                {povLine.split("\n").map((line) => (
+                  <div key={line}>{line}</div>
+                ))}
               </div>
             )}
 
@@ -1910,7 +1946,7 @@ export default function Home() {
               <RestartIcon />
             </button>
             <button
-              onClick={() => setShowShare(true)}
+              onClick={openShare}
               aria-label="Share"
               style={{
                 position: "absolute",
@@ -1984,7 +2020,7 @@ export default function Home() {
                       ? "Save it to your camera roll or send it to someone who was there."
                       : shareFailed
                         ? "The share export couldn't finish here. You can still watch the film again."
-                        : "Your film is still developing — the button lights up when it's ready."}
+                        : "Getting your share video ready."}
                   </div>
                   <button
                     onClick={shareFilm}

@@ -106,11 +106,11 @@ button {
   68% {
     opacity: 0.85;
     transform: translate(-50%, -50%)
-      translate(calc(var(--dx) * 55%), calc(var(--dy) * 55%)) scale(1.5);
+      translate(calc(var(--dx) * 55%), calc(var(--dy) * 55%)) scale(1.32);
   }
   100% {
     opacity: 0;
     transform: translate(-50%, -50%)
-      translate(calc(var(--dx) * 92%), calc(var(--dy) * 92%)) scale(2.1);
+      translate(calc(var(--dx) * 92%), calc(var(--dy) * 92%)) scale(1.82);
   }
 }
