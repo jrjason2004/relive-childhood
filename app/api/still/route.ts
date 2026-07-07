@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import { generateImage } from "@/lib/gemini";
-import { fetchReferenceImages, type RefImage } from "@/lib/serpapi";
+import { fetchReferenceImages, type RefImage } from "@/lib/refimages";
 import { saveStill, composeRealSlide, stillPath } from "@/lib/video";
 
 export const runtime = "nodejs";
@@ -42,8 +42,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // One retry: the narration reads the storyboard slide by slide, so a
-    // missing still now shifts every later scene off its sentence.
+    // One retry: a missing still would shift every later storyboard scene.
     let still: Awaited<ReturnType<typeof generateImage>> | null = null;
     let lastErr: unknown = null;
     for (let attempt = 0; attempt < 2 && !still; attempt++) {
@@ -56,7 +55,10 @@ export async function POST(req: Request) {
     if (!still) throw lastErr instanceof Error ? lastErr : new Error("Image generation failed");
     const bytes = Buffer.from(still.data, "base64");
     await saveStill(sessionId, index, bytes).catch(() => {});
-    return imageResponse(new Uint8Array(bytes), still.mimeType || "image/jpeg");
+    const res = imageResponse(new Uint8Array(bytes), still.mimeType || "image/jpeg");
+    // how many real reference photos grounded this still (0 = ungrounded)
+    res.headers.set("x-ref-count", String(refs.length));
+    return res;
   } catch (err: any) {
     return NextResponse.json({ error: err?.message ?? "Still generation failed" }, { status: 500 });
   }

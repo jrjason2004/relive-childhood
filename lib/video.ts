@@ -6,9 +6,10 @@ import path from "path";
 import { spawn } from "child_process";
 import { trackForSession } from "@/lib/music";
 
-// The clips' own audio is muted; the final film uses the session's background
-// track only (same one the live player streamed via /api/music).
+// The clips' own audio is muted; stitched films use background music only.
 const BG_MUSIC_VOLUME = Number(process.env.BG_MUSIC_VOLUME ?? 1.0);
+const HYBRID_MUSIC = path.join(process.cwd(), "public", "music", "childhood-1.mp3");
+const HYBRID_SCENE_SECONDS = 2.0;
 
 function safeId(sessionId: string): string {
   const clean = sessionId.replace(/[^a-zA-Z0-9_-]/g, "");
@@ -40,17 +41,6 @@ export async function saveClip(sessionId: string, index: number, data: Buffer): 
 export async function saveStill(sessionId: string, index: number, data: Buffer): Promise<void> {
   await fs.mkdir(sessionDir(sessionId), { recursive: true });
   await fs.writeFile(stillPath(sessionId, index), data);
-}
-
-// The narration comes in two parts: 1 = the opening (warm slides, no
-// research), 2 = the continuation (researched scenes).
-export function voiceoverPath(sessionId: string, part = 1): string {
-  return path.join(sessionDir(sessionId), `voiceover-${part}.wav`);
-}
-
-export async function saveVoiceover(sessionId: string, part: number, wav: Buffer): Promise<void> {
-  await fs.mkdir(sessionDir(sessionId), { recursive: true });
-  await fs.writeFile(voiceoverPath(sessionId, part), wav);
 }
 
 // Compose a real archival photo into a full-screen 1080x1920 slide: the photo
@@ -89,10 +79,7 @@ export async function composeRealSlide(
 
 // Render the stills into a Ken Burns film: each still becomes a zoompan
 // segment (direction alternates by position), segments are joined with 0.5s
-// crossfades, and the session track plays underneath. When the session has a
-// voiceover, the segment length stretches so the film covers the narration
-// (with a short tail) and the music ducks under the voice; otherwise segments
-// are 6s to match the live slideshow pacing.
+// crossfades, and the session track plays underneath.
 export async function stitchStills(sessionId: string, indices: number[]): Promise<string> {
   const out = finalPath(sessionId);
   const FADE = 0.5; // crossfade duration
@@ -100,24 +87,13 @@ export async function stitchStills(sessionId: string, indices: number[]): Promis
 
   const music = await trackForSession(sessionId);
   const hasMusic = music !== null && (await fileExists(music));
-  const vo = voiceoverPath(sessionId);
-  const hasVo = await fileExists(vo);
 
-  let SEG = 6.0; // seconds per still (matches SLIDE_MS in the live player)
-  if (hasVo) {
-    const voDur = await probeDuration(vo);
-    if (voDur > 0) {
-      // total = n*SEG - (n-1)*FADE; solve for SEG so total ≈ voDur + 2s tail
-      const n = indices.length;
-      SEG = Math.min(9, Math.max(3, (voDur + 2 + (n - 1) * FADE) / n));
-    }
-  }
+  const SEG = 6.0;
   const frames = Math.round(SEG * FPS);
 
   const args: string[] = ["-y"];
   for (const i of indices) args.push("-i", stillPath(sessionId, i));
   if (hasMusic) args.push("-stream_loop", "-1", "-i", music!);
-  if (hasVo) args.push("-i", vo);
 
   // Upscale before zoompan for smooth sub-pixel motion.
   const kens = [
@@ -150,21 +126,11 @@ export async function stitchStills(sessionId: string, indices: number[]): Promis
   }
 
   const musicIn = indices.length;
-  const voIn = musicIn + (hasMusic ? 1 : 0);
-  if (hasMusic && hasVo) {
-    // Voice on top, music ducked underneath (normalize=0 keeps true levels).
-    parts.push(
-      `[${musicIn}:a]volume=${BG_MUSIC_VOLUME * 0.35}[m]`,
-      `[${voIn}:a]volume=1.0[v]`,
-      `[m][v]amix=inputs=2:duration=longest:normalize=0[aout]`,
-    );
-  } else if (hasMusic) {
+  if (hasMusic) {
     parts.push(`[${musicIn}:a]volume=${BG_MUSIC_VOLUME}[aout]`);
-  } else if (hasVo) {
-    parts.push(`[${voIn}:a]volume=1.0[aout]`);
   }
 
-  if (hasMusic || hasVo) {
+  if (hasMusic) {
     args.push(
       "-filter_complex", parts.join(";"),
       "-map", "[vout]", "-map", "[aout]",
@@ -186,18 +152,103 @@ export async function stitchStills(sessionId: string, indices: number[]): Promis
   return out;
 }
 
-async function probeDuration(file: string): Promise<number> {
-  return new Promise((resolve) => {
-    const proc = spawn(
-      "ffprobe",
-      ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file],
-      { stdio: ["ignore", "pipe", "ignore"] },
+// Render the shareable film from whatever each slide has: the Wan clip when
+// it rendered (looped to fill its segment, upscaled to 1080x1920), otherwise
+// a Ken Burns pass over the still. Segments join with short crossfades and the
+// TikTok-style POV line is burned in on top. The visual pass is fixed to
+// indices.length × 2 seconds; segment duration compensates for crossfade
+// overlap so seven scenes render to 14 seconds.
+export async function stitchHybrid(
+  sessionId: string,
+  indices: number[],
+  povPng: Buffer | null,
+): Promise<string> {
+  const out = finalPath(sessionId);
+  const FADE = 0.35;
+  const FPS = 30;
+
+  const n = indices.length;
+  const totalSeconds = n * HYBRID_SCENE_SECONDS;
+  const SEG = (totalSeconds + (n - 1) * FADE) / n;
+  const frames = Math.round(SEG * FPS);
+
+  const kens = [
+    `zoompan=z='1.03+0.13*on/${frames - 1}':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2'`,
+    `zoompan=z='1.16-0.13*on/${frames - 1}':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2'`,
+    `zoompan=z='1.12':x='(iw-iw/zoom)*on/${frames - 1}':y='(ih-ih/zoom)/2'`,
+    `zoompan=z='1.12':x='(iw-iw/zoom)*(1-on/${frames - 1})':y='(ih-ih/zoom)/2'`,
+  ];
+
+  const args: string[] = ["-y"];
+  const parts: string[] = [];
+  let inputIdx = 0;
+  for (let k = 0; k < n; k++) {
+    const clip = clipPath(sessionId, indices[k]);
+    if (await fileExists(clip)) {
+      // Loop the ~2s clip to fill its segment, cover-crop to 720x1280 —
+      // 1.5x the 480x864 source keeps it crisp on phones without ballooning
+      // the file the way a 1080p upscale of diffusion footage does.
+      args.push("-stream_loop", "-1", "-i", clip);
+      parts.push(
+        `[${inputIdx}:v]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,` +
+          `fps=${FPS},trim=duration=${SEG.toFixed(2)},setpts=PTS-STARTPTS,format=yuv420p,setsar=1[v${k}]`,
+      );
+    } else {
+      args.push("-i", stillPath(sessionId, indices[k]));
+      parts.push(
+        `[${inputIdx}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,` +
+          `${kens[k % kens.length]}:d=${frames}:s=720x1280:fps=${FPS},format=yuv420p,setsar=1[v${k}]`,
+      );
+    }
+    inputIdx++;
+  }
+
+  let vout = "[v0]";
+  for (let k = 1; k < n; k++) {
+    const offset = (SEG - FADE) * k;
+    const label = `[x${k}]`;
+    parts.push(`${vout}[v${k}]xfade=transition=fade:duration=${FADE}:offset=${offset.toFixed(2)}${label}`);
+    vout = label;
+  }
+  if (n === 1) {
+    parts.push(`[v0]copy[x0]`);
+    vout = "[x0]";
+  }
+
+  // TikTok-style POV line, burned in near the top. The client renders it to
+  // a transparent 1080-wide PNG (this ffmpeg build has no drawtext filter,
+  // and canvas text matches the live overlay exactly).
+  let povPath: string | null = null;
+  if (povPng && povPng.length > 0) {
+    povPath = path.join(sessionDir(sessionId), "pov.png");
+    await fs.writeFile(povPath, povPng);
+    args.push("-loop", "1", "-i", povPath);
+    // The client renders the PNG at 1080 wide; scale it to the 720 canvas.
+    parts.push(
+      `[${inputIdx}:v]scale=720:-1[pov]`,
+      `${vout}[pov]overlay=(W-w)/2:H*0.11:format=auto[vtxt]`,
     );
-    let outStr = "";
-    proc.stdout.on("data", (d) => (outStr += d.toString()));
-    proc.on("error", () => resolve(0));
-    proc.on("close", () => resolve(Number(outStr.trim()) || 0));
-  });
+    vout = "[vtxt]";
+    inputIdx++;
+  }
+
+  if (!(await fileExists(HYBRID_MUSIC))) {
+    throw new Error("Missing public/music/childhood-1.mp3");
+  }
+  args.push("-t", totalSeconds.toFixed(2), "-i", HYBRID_MUSIC);
+  parts.push(
+    `[${inputIdx}:a]atrim=0:${totalSeconds.toFixed(2)},asetpts=PTS-STARTPTS,volume=${BG_MUSIC_VOLUME}[aout]`,
+  );
+
+  args.push("-filter_complex", parts.join(";"), "-map", vout, "-map", "[aout]", "-c:a", "aac");
+  args.push(
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+    "-shortest", "-movflags", "+faststart",
+    out,
+  );
+
+  await runFfmpeg(args);
+  return out;
 }
 
 // Concatenate the given clip indices (in order) into one MP4 and mix the

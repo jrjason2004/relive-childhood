@@ -4,18 +4,18 @@
 // (handoff/childhood-memory-reliving-website/project/Reverie.dc.html), wired
 // to the real pipeline: scan → Gemini age estimate (the warm slides start
 // rendering here), city → research, time travel → an accelerating date rewind
-// over the live camera with finished memories popping up as polaroids (the
-// session music starts here and runs continuously), film → a live
-// index-order Ken Burns slideshow of ~10 high-quality stills (3 era-only
-// warm slides + 7 researched moments) while a generated packed-summer-day
-// voiceover reads the same storyboard in slide order over the ducked music.
-// The narration comes in two parts so it speaks from the very first frame:
-// the opening (warm slides, built during travel — the reveal waits for it)
-// and the continuation (researched scenes, takes over when the opening
-// ends). This is a pure LIVE experience: it loops forever, there is no
-// shareable file, and the film NEVER shows progress/waiting popups — it must
-// always feel live. Set NEXT_PUBLIC_USE_WAN=1 to switch the film back to
-// Wan 2.2 motion clips (that legacy path still stitches an mp4).
+// over the live camera (the session music starts here and runs continuously),
+// film → a live index-order film of 7 scenes (3 era-only warm + 4 researched):
+// each scene's Nano Banana still appears instantly (surfacing as a slow, soft
+// full-screen glimpse on the travel countdown) and upgrades in place to a
+// Wan 2.2 motion clip as the fleet finishes it — clips loop within their
+// scene, stills Ken Burns until then. The reveal waits for the first Wan clip,
+// with rotating personalized loading lines keeping the travel screen alive. A
+// TikTok-style "POV: {city} in {year}" line sits on the film and is burned
+// into the shareable mp4 (ffmpeg hybrid stitch: clips + Ken Burns fallbacks +
+// music + POV text), offered via the share sheet after the first full pass. The
+// film screen itself never shows progress popups. Set NEXT_PUBLIC_USE_WAN=1 for
+// the legacy pure-clip path.
 
 import { useEffect, useRef, useState } from "react";
 
@@ -77,29 +77,98 @@ const CONCURRENCY = 7;
 const CHILD_AGE = 7; // matches the POV age in the image/video prompts
 const USE_WAN = process.env.NEXT_PUBLIC_USE_WAN === "1"; // motion clips instead of stills
 const WARM_COUNT = 3; // era-only slides that start rendering at the age reveal
-const SLIDE_MS = 6000; // per slide; a 10-slide pass ≈ the ~60s voiceover
-// Tiny silent WAV: unlocks the voiceover <audio> inside the tap gesture so
-// the narration can start programmatically once it's generated.
-const SILENT_WAV =
-  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+const SLIDE_MS = 2000; // 7 slides × 2s = a 14s first pass
 const KEN_ANIMS = ["rcKenA", "rcKenB", "rcKenC", "rcKenD"];
 const SANS = "var(--font-sans), sans-serif";
 const SERIF = "var(--font-serif), serif";
 
-// Where travel polaroids land (deterministic, clear of the countdown text).
-const POLAROID_SPOTS: Array<{
-  left?: string;
-  right?: string;
-  top?: string;
-  bottom?: string;
-  rot: number;
-}> = [
-  { left: "7%", top: "8%", rot: -7 },
-  { right: "6%", top: "16%", rot: 6 },
-  { left: "10%", bottom: "11%", rot: -4 },
-  { right: "9%", bottom: "16%", rot: 8 },
-  { left: "38%", top: "5%", rot: 3 },
-];
+// Tear-off calendar: at most one page rips per travel tick, throttled so the
+// fast phase reads as a flurry instead of a solid blur.
+const RIP_MS = 750; // one page's tear-and-fly
+const RIP_MIN_GAP_MS = 70;
+const MAX_RIPS = 8;
+
+// One month page of the travel calendar (also the pages that tear off).
+function CalendarPage({ month, year }: { month: string; year: number }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        background: "linear-gradient(#fbf6ec, #ebdfc9)",
+        borderRadius: 10,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        boxShadow: "0 10px 22px -8px rgba(0,0,0,0.55)",
+        backfaceVisibility: "hidden",
+      }}
+    >
+      <div style={{ fontWeight: 700, letterSpacing: "0.24em", fontSize: 14, color: "#8d2f23" }}>
+        {month}
+      </div>
+      <div
+        style={{
+          fontFamily: SERIF,
+          fontSize: 56,
+          lineHeight: 1.05,
+          color: "#241c15",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {year}
+      </div>
+      <div
+        style={{
+          marginTop: 12,
+          display: "grid",
+          gridTemplateColumns: "repeat(7, 17px)",
+          rowGap: 4,
+        }}
+      >
+        {Array.from({ length: 28 }, (_, i) => (
+          <div
+            key={i}
+            style={{
+              fontSize: 8,
+              textAlign: "center",
+              color: "rgba(60,45,30,0.45)",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {i + 1}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// The POV line as a transparent 1080-wide PNG data URL for the ffmpeg
+// overlay — same TikTok look as the live element (bold white, thick black
+// stroke).
+function renderPovPng(text: string): string {
+  try {
+    const c = document.createElement("canvas");
+    c.width = 1080;
+    c.height = 160;
+    const x = c.getContext("2d");
+    if (!x) return "";
+    x.font = "800 64px -apple-system, 'Helvetica Neue', Arial, sans-serif";
+    x.textAlign = "center";
+    x.textBaseline = "middle";
+    x.lineJoin = "round";
+    x.lineWidth = 14;
+    x.strokeStyle = "rgba(0,0,0,0.9)";
+    x.strokeText(text, 540, 80);
+    x.fillStyle = "#fff";
+    x.fillText(text, 540, 80);
+    return c.toDataURL("image/png");
+  } catch {
+    return "";
+  }
+}
 
 // Run async tasks with bounded concurrency, preserving result order.
 async function runPool<T>(tasks: Array<() => Promise<T>>, limit: number): Promise<T[]> {
@@ -114,17 +183,6 @@ async function runPool<T>(tasks: Array<() => Promise<T>>, limit: number): Promis
   await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
   return results;
 }
-
-// Deterministic sparkle field for the time-travel overlay (stable across
-// renders and across server/client).
-const SPARKS = Array.from({ length: 14 }, (_, i) => ({
-  left: `${((i * 37 + 13) % 92) + 4}%`,
-  top: `${((i * 53 + 29) % 84) + 8}%`,
-  size: 2.5 + (i % 3) * 1.5,
-  delay: `${(i % 7) * 0.45}s`,
-  blink: `${2 + (i % 5) * 0.5}s`,
-  float: `${3.5 + (i % 4) * 0.9}s`,
-}));
 
 const FULL_BLEED: React.CSSProperties = {
   position: "absolute",
@@ -147,34 +205,46 @@ export default function Home() {
   const [veilSlow, setVeilSlow] = useState(false);
   const [error, setError] = useState("");
 
-  // ---- film (live player: slides play in index/story order — the narration
-  // follows the same order, so the words track what's on screen)
-  const [playlist, setPlaylist] = useState<Array<{ idx: number; url: string }>>([]);
+  // ---- film (live player: scenes play in index/story order; the film is
+  // video-only, so a scene enters the playlist only when its Wan clip lands)
+  const [playlist, setPlaylist] = useState<
+    Array<{ idx: number; url: string; video?: string }>
+  >([]);
+  const [videoCount, setVideoCount] = useState(0); // finished Wan clips
+  // ---- travel show
+  const [rips, setRips] = useState<
+    Array<{ id: number; month: string; year: number; z: number }>
+  >([]);
+  const [decades, setDecades] = useState<Array<{ id: number; label: string }>>([]);
+  const [loadTick, setLoadTick] = useState(0); // rotates the travel loading lines
   const [total, setTotal] = useState(0);
   const [cursor, setCursor] = useState(0);
   const [genDone, setGenDone] = useState(false);
   const [liveDone, setLiveDone] = useState(false);
-  const [videoUrl, setVideoUrl] = useState(""); // Wan mode only: stitched mp4 (blob URL)
-  const [vo1Url, setVo1Url] = useState(""); // narration part 1: the opening (blob URL)
-  const [vo2Url, setVo2Url] = useState(""); // narration part 2: researched scenes (blob URL)
-  const [voEndedTick, setVoEndedTick] = useState(0); // re-runs effects when a part ends
+  const [videoUrl, setVideoUrl] = useState(""); // stitched shareable mp4 (blob URL)
+  const [showShare, setShowShare] = useState(false);
+  const [toast, setToast] = useState("");
   const [muted, setMuted] = useState(false);
 
   const mirrorRef = useRef<HTMLVideoElement>(null);
   const filmRef = useRef<HTMLVideoElement>(null);
   const clipRefs = useRef<Array<HTMLVideoElement | null>>([]);
   const musicRef = useRef<HTMLAudioElement>(null);
-  const voRef = useRef<HTMLAudioElement>(null);
-  const voStartedRef = useRef(false); // narration has begun at least once
-  const voPartRef = useRef<0 | 1 | 2>(0); // which narration part is loaded
-  const voDursRef = useRef<[number, number]>([0, 0]); // part durations (s); pace the slides
-  const vo1BuildRef = useRef<Promise<string> | null>(null); // resolves part 1's script
-  const vo1SettledRef = useRef(false); // part 1 finished building (or failed) — unblocks the reveal
   const fileRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const blobUrlsRef = useRef<string[]>([]); // object URLs to revoke on restart
+  const finalBlobRef = useRef<Blob | null>(null); // stitched mp4 for Web Share
+  const videoElsRef = useRef<Record<number, HTMLVideoElement | null>>({}); // slide clips
+  const travelT0Ref = useRef(0); // when travel began (loading lines + reveal cap)
+  // Travel show: tear-off calendar pages, decade fly-bys, warp canvas.
+  const ripIdRef = useRef(0);
+  const ripLastRef = useRef(0);
+  const prevMonthKeyRef = useRef(-1);
+  const prevDecadeRef = useRef(-1);
+  const warpRef = useRef<HTMLCanvasElement | null>(null);
+  const warpSpeedRef = useRef(0); // eased travel progress, read by the warp rAF loop
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const warmRef = useRef<Promise<Array<number | null>> | null>(null); // warm slides (first indices)
-  const warmScenesRef = useRef<string[]>([]); // scene texts, reused by the narration
   const arrivalRef = useRef<{ from: number; t0: number; rampMs: number } | null>(null);
   const revealFiredRef = useRef(false);
   const sessionRef = useRef("");
@@ -281,8 +351,7 @@ export default function Home() {
     // memories exist before the user finishes typing their hometown.
     const scenes = [...WARM_SCENES]
       .sort(() => Math.random() - 0.5)
-      .slice(0, USE_WAN ? 1 : WARM_COUNT);
-    warmScenesRef.current = scenes.map((s) => s.image);
+      .slice(0, WARM_COUNT);
     warmRef.current = Promise.all(
       scenes.map((scene, k) =>
         buildSlide(run, sessionId, k, {
@@ -350,9 +419,9 @@ export default function Home() {
 
   // ================= city → travel + real pipeline =================
 
-  // Generate one slide (a still by default; a Wan clip when USE_WAN) and, on
-  // success, prefetch it into a blob and append it to the live playlist.
-  // Returns its index, or null on failure.
+  // Generate one scene. Default path: Nano Banana still → Wan clip; the film
+  // is video-only, so nothing joins the playlist until the clip exists.
+  // Returns its index once the scene is playable, or null on failure.
   async function buildSlide(
     run: number,
     sessionId: string,
@@ -386,84 +455,72 @@ export default function Home() {
         throw new Error(d.error || "Slide failed");
       }
       if (runRef.current !== run) return null;
-      let url: string;
       if (USE_WAN) {
         // Wan clips are served by a follow-up GET (local-only path).
         await r.json().catch(() => ({}));
         const apiUrl = `/api/video?session=${encodeURIComponent(sessionId)}&clip=${i}`;
-        url = apiUrl;
+        let url = apiUrl;
         try {
           const blob = await (await fetch(apiUrl)).blob();
           url = URL.createObjectURL(blob);
           blobUrlsRef.current.push(url);
         } catch {}
-      } else {
-        // The still comes back in the POST body (serverless instances don't
-        // share disk) — straight into a blob so display is instant.
-        const blob = await r.blob();
-        url = URL.createObjectURL(blob);
-        blobUrlsRef.current.push(url);
+        if (runRef.current !== run) return null;
+        // Insert in index order so the live pass follows the storyboard order
+        // (a late slide slots into place, not onto the end).
+        setPlaylist((prev) =>
+          [...prev, { idx: i, url }].sort((a, b) => a.idx - b.idx),
+        );
+        return i;
       }
-      if (runRef.current !== run) return null;
-      // Insert in index order so the live pass matches the narration's
-      // storyboard order (a late slide slots into place, not onto the end).
-      setPlaylist((prev) =>
-        [...prev, { idx: i, url }].sort((a, b) => a.idx - b.idx),
-      );
-      return i;
+      // The still comes back in the POST body (serverless instances don't
+      // share disk). It is never shown — it exists to hand Wan the exact
+      // frame to animate.
+      const blob = await r.blob();
+      return (await animateSlide(run, sessionId, i, blob, spec.videoPrompt)) ? i : null;
     } catch {
       return null;
     }
   }
 
-  // Generate one narration part and prefetch it to a blob. Part 1 (the
-  // opening over the warm slides) fires at "Take me back" and gates the film
-  // reveal so the voice starts on the very first frame; part 2 continues the
-  // day through the researched scenes and takes over when part 1 ends.
-  // Returns the script (part 2 needs part 1's for continuity); failure is
-  // silent — the film plays with music alone.
-  async function buildVoiceover(
+  // Animate one scene's still into a Wan 2.2 clip, routed least-busy across
+  // the fleet by the server. The film is video-only: the scene joins the
+  // playlist only here, once it moves; on failure it simply never exists.
+  async function animateSlide(
     run: number,
     sessionId: string,
-    prof: Profile,
-    cityName: string,
-    scenes: string[],
-    part: 1 | 2,
-    prevScript = "",
-  ): Promise<string> {
+    i: number,
+    still: Blob,
+    videoPrompt: string,
+  ): Promise<boolean> {
     try {
-      const r = await fetch("/api/voiceover", {
+      const buf = new Uint8Array(await still.arrayBuffer());
+      let bin = "";
+      for (let o = 0; o < buf.length; o += 0x8000) {
+        bin += String.fromCharCode(...buf.subarray(o, o + 0x8000));
+      }
+      const r = await fetch("/api/clip", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId,
-          profile: prof,
-          city: cityName,
-          scenes,
-          part,
-          prevScript,
+          index: i,
+          videoPrompt,
+          image: { data: btoa(bin), mimeType: still.type || "image/jpeg" },
         }),
       });
-      if (!r.ok) return "";
-      if (runRef.current !== run) return "";
-      // The WAV rides in the response body; duration + script in headers
-      // (serverless instances don't share disk, so no follow-up GET).
-      const duration = Number(r.headers.get("x-vo-duration"));
-      if (duration > 0) voDursRef.current[part - 1] = duration;
-      let script = "";
-      try {
-        script = decodeURIComponent(r.headers.get("x-vo-script") ?? "");
-      } catch {}
+      if (!r.ok) return false;
       const blob = await r.blob();
-      if (runRef.current !== run) return "";
+      if (runRef.current !== run) return false;
       const url = URL.createObjectURL(blob);
       blobUrlsRef.current.push(url);
-      (part === 1 ? setVo1Url : setVo2Url)(url);
-      return script;
+      setPlaylist((prev) =>
+        [...prev, { idx: i, url, video: url }].sort((a, b) => a.idx - b.idx),
+      );
+      setVideoCount((c) => c + 1);
+      return true;
     } catch {
-      return ""; // no narration for this part
-    } finally {
-      if (part === 1) vo1SettledRef.current = true;
+      return false;
     }
   }
 
@@ -478,33 +535,12 @@ export default function Home() {
     const sessionId = sessionRef.current;
 
     // The session's track starts here, inside the tap gesture, and plays
-    // continuously through travel and the film (the ~9-minute tracks cover
-    // the whole experience). The voiceover element is unlocked with a silent
-    // blip so the narration can start programmatically once it's generated.
+    // continuously through travel and the film.
     const m = musicRef.current;
     if (m) {
       m.src = `/api/music?session=${encodeURIComponent(sessionId)}`;
       m.volume = 1;
       m.play().catch(() => {});
-    }
-    const vo = voRef.current;
-    if (vo) {
-      vo.src = SILENT_WAV;
-      vo.play().catch(() => {});
-    }
-
-    // The opening narration needs no research — it covers the warm slides —
-    // so it starts building right now and the reveal waits for it: the film
-    // opens with the voice already on slide 0.
-    if (!USE_WAN) {
-      vo1BuildRef.current = buildVoiceover(
-        run,
-        sessionId,
-        profile,
-        city.trim(),
-        warmScenesRef.current,
-        1,
-      );
     }
 
     clearTimers();
@@ -522,11 +558,13 @@ export default function Home() {
     // and the veil reveals the film. The displayed date rewinds on an
     // ease-in curve of this progress, so it starts slow and speeds up.
     const t0 = Date.now();
+    travelT0Ref.current = t0;
     travelTimer.current = setInterval(() => {
       if (runRef.current !== run) {
         if (travelTimer.current) clearInterval(travelTimer.current);
         return;
       }
+      setLoadTick(Math.floor((Date.now() - t0) / 3400));
       const a = arrivalRef.current;
       if (a) {
         const q = Math.min(1, (Date.now() - a.t0) / a.rampMs);
@@ -575,32 +613,12 @@ export default function Home() {
 
       const moments: Moment[] = data.moments ?? [];
       // The warm slides (first indices) have been rendering since the age
-      // reveal. Stills mode: every researched moment becomes a generated POV
-      // slide — 3 warm + 7 researched ≈ 10 slides. Wan mode keeps the old
-      // 1 warm + 4 clips. The voiceover narrates this exact storyboard in
-      // slide order, so it can only start once the research is back.
+      // reveal. Keep the instant warm start, then add four researched POV
+      // moments for a seven-scene film.
       const warm = warmRef.current;
-      const warmCount = warm ? (USE_WAN ? 1 : WARM_COUNT) : 0;
-      const queue = USE_WAN ? moments.slice(0, 5 - warmCount) : moments.slice(0, 7);
+      const warmCount = warm ? WARM_COUNT : 0;
+      const queue = moments.slice(0, Math.max(0, 7 - warmCount));
       setTotal(warmCount + queue.length);
-
-      if (!USE_WAN) {
-        // Part 2 continues from part 1's script through the researched
-        // scenes; the live player hands over to it when the opening ends.
-        (async () => {
-          const s1 = vo1BuildRef.current ? await vo1BuildRef.current : "";
-          if (runRef.current !== run) return;
-          buildVoiceover(
-            run,
-            sessionId,
-            prof,
-            cityName,
-            queue.map((m) => `${m.title}: ${m.description}`),
-            2,
-            s1,
-          );
-        })();
-      }
 
       const tasks = queue.map((m, j) => () =>
         buildSlide(run, sessionId, warmCount + j, {
@@ -624,26 +642,45 @@ export default function Home() {
         .sort((a, b) => a - b);
       if (ok.length === 0) throw new Error("The film couldn't be developed");
 
-      // Stills mode is a pure live experience — nothing to render. Wan mode
-      // still stitches its clips into an mp4 for the seamless-loop swap.
-      if (USE_WAN) {
+      // Every index in `ok` has a rendered Wan clip (buildSlide resolves only
+      // after the clip lands), so the stitched mp4 is video-only too.
+      const birthYear = new Date().getFullYear() - prof.ageYears;
+      const povCity = cityName.split(",")[0].trim();
+      const povText = `POV: ${povCity.charAt(0).toUpperCase() + povCity.slice(1)} in ${birthYear + 7}`;
+      // Render the POV line to a transparent PNG for the stitch overlay —
+      // canvas text matches the live overlay exactly, and the local ffmpeg
+      // build has no drawtext filter.
+      const povImage = renderPovPng(povText);
+
+      // A stitch failure only affects sharing — the live film keeps playing,
+      // so it must never surface as a full-screen error.
+      try {
         const sr = await fetch("/api/stitch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, indices: ok, mode: "clips" }),
+          body: JSON.stringify({
+            sessionId,
+            indices: ok,
+            mode: USE_WAN ? "clips" : "hybrid",
+            povImage,
+          }),
         });
         const sd = await sr.json();
         if (!sr.ok) throw new Error(sd.error || "Stitch failed");
         if (runRef.current !== run) return;
-        // Blob playback avoids a network hiccup on the live → final swap.
+        // Keep the mp4 as a blob: Web Share needs a File, and blob playback
+        // avoids a network hiccup on the legacy live → final swap.
         let finalUrl: string = sd.videoUrl;
         try {
           const blob = await (await fetch(sd.videoUrl)).blob();
+          finalBlobRef.current = blob;
           finalUrl = URL.createObjectURL(blob);
           blobUrlsRef.current.push(finalUrl);
         } catch {}
         if (runRef.current !== run) return;
         setVideoUrl(finalUrl);
+      } catch {
+        if (USE_WAN) throw new Error("The film couldn't be developed");
       }
     } catch (err: any) {
       if (runRef.current === run) setError(err?.message ?? "Something went wrong");
@@ -656,15 +693,16 @@ export default function Home() {
   // on entering travel — a slightly longer ramp keeps it cinematic.
   useEffect(() => {
     if (screen !== "travel" || playlist.length === 0 || arrivalRef.current) return;
-    // The reveal also waits for the opening narration (or its failure) so
-    // the voice starts speaking on the very first frame of the film.
-    if (!USE_WAN && !vo1Url && !vo1SettledRef.current) return;
+    // The film is video-only, so a non-empty playlist already means at least
+    // one Wan clip is playable — the calendar show carries the wait until
+    // then. (The videoCount check is belt-and-braces for the legacy path.)
+    if (!USE_WAN && videoCount === 0) return;
     arrivalRef.current = {
       from: travelP,
       t0: Date.now(),
       rampMs: travelP < 15 ? 6000 : 3500,
     };
-  }, [screen, playlist.length, travelP, vo1Url]);
+  }, [screen, playlist.length, travelP, videoCount]);
 
   // ================= live player driver =================
 
@@ -672,105 +710,48 @@ export default function Home() {
     if (screen !== "film") return;
     if (cursor < playlist.length) return;
     if (genDone && playlist.length > 0) {
-      if (!liveDone) setLiveDone(true);
-      if (!USE_WAN) {
-        // The slideshow loops forever. The music keeps playing straight
-        // through; the narration (re)starts in sync with the new pass — it
-        // reads the storyboard in slide order, so it only ever begins at a
-        // pass boundary. If the slides finished a beat before the voice
-        // (they pace to it, but never drift more than a slide), the last
-        // slide just keeps drifting until the narration lands its final
-        // line, then the new pass and the narration start together.
-        const vo = voRef.current;
-        if (vo && voStartedRef.current && !vo.ended && !vo.paused) {
-          return; // let the narration finish; its ended event re-runs this
-        }
-        setCursor(0);
-        if (vo && vo1Url && (!voStartedRef.current || vo.ended)) startVoiceover(1);
+      if (!liveDone) {
+        setLiveDone(true);
+        setShowShare(true); // first full playthrough done — offer the share sheet
       }
+      if (!USE_WAN) setCursor(0);
     }
     // While the next slide renders, the current one just keeps drifting —
     // never a waiting popup; it has to feel live.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, playlist, cursor, genDone, liveDone, vo1Url, voEndedTick]);
+  }, [screen, playlist.length, cursor, genDone, liveDone]);
 
-  // Music sits under the narration while it speaks (volume is a no-op on iOS,
-  // where the mix just plays at full — acceptable).
-  function duckMusic(duck: boolean) {
-    const m = musicRef.current;
-    if (m) m.volume = duck ? 0.35 : 1;
-  }
+  const finalMode = liveDone && Boolean(videoUrl); // legacy Wan mode swaps to the mp4
 
-  // (Re)start a narration part from its top: each part tracks its slides one
-  // sentence per scene, so it always begins aligned.
-  function startVoiceover(part: 1 | 2) {
-    const url = part === 1 ? vo1Url : vo2Url;
-    const vo = voRef.current;
-    if (!vo || !url) return;
-    voStartedRef.current = true;
-    voPartRef.current = part;
-    if (vo.src !== url) vo.src = url;
-    vo.currentTime = 0;
-    vo.muted = muted;
-    duckMusic(true);
-    vo.play().catch(() => {});
-  }
-
-  // The reveal waits for the opening, so this normally fires on the film's
-  // very first frame; the cursor guard covers the fallback where the opening
-  // arrives late (it then joins mid-pass only if the pass just began).
-  useEffect(() => {
-    if (USE_WAN || screen !== "film" || !vo1Url || voStartedRef.current) return;
-    if (cursor <= 1) startVoiceover(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, vo1Url, cursor]);
-
-  // Hand over from the opening to part 2: the moment part 1 has ended and
-  // part 2 exists (either order), the continuation starts and the slide
-  // clock walks the researched scenes. Between parts the music swells back.
-  useEffect(() => {
-    if (USE_WAN || screen !== "film" || !vo2Url) return;
-    const vo = voRef.current;
-    if (voPartRef.current === 1 && vo && vo.ended) startVoiceover(2);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, vo2Url, voEndedTick]);
-
-  const finalMode = liveDone && Boolean(videoUrl); // Wan mode only: swap to the mp4
-
-  // Slideshow driver: advance while the next slide exists. Once a narration
-  // part is playing it becomes the clock — part 1 spans the warm slides,
-  // part 2 the researched ones, each scene owning an equal share of its
-  // part — slides flip at those boundaries, and after any hiccup (audio
-  // suspension, timer throttling) the cursor snaps forward onto the scene
-  // the voice is actually on, so words and images can't drift apart.
+  // Slideshow driver: advance every two seconds while the next slide exists.
+  // If generation falls behind, the current scene keeps drifting until the
+  // next index appears.
   useEffect(() => {
     if (USE_WAN || screen !== "film") return;
     if (cursor >= playlist.length) return; // holding on the last slide or looping
     const n = genDone ? playlist.length : Math.max(total, playlist.length, 1);
-    const part = voPartRef.current;
-    const dur = part > 0 ? voDursRef.current[part - 1] : 0;
-    const base = part === 2 ? Math.min(WARM_COUNT, n - 1) : 0;
-    const span = part === 2 ? Math.max(n - WARM_COUNT, 1) : Math.min(WARM_COUNT, n);
-    const voLive = () => {
-      const v = voRef.current;
-      return Boolean(v && voStartedRef.current && !v.paused && !v.ended && dur > 0);
-    };
-    const seg = voLive() ? Math.max(2, dur / span) : SLIDE_MS / 1000;
-    let delay = seg * 1000;
-    if (voLive()) {
-      const t = voRef.current!.currentTime;
-      delay = Math.max(250, (Math.floor(t / seg) + 1) * seg * 1000 - t * 1000);
-    }
     const timer = setTimeout(() => {
-      if (voLive()) {
-        const target = Math.min(base + Math.floor(voRef.current!.currentTime / seg), n - 1);
-        setCursor((c) => (target > c ? target : c + 1));
-      } else {
-        setCursor((c) => c + 1);
-      }
-    }, delay);
+      setCursor((c) => Math.min(c + 1, n));
+    }, SLIDE_MS);
     return () => clearTimeout(timer);
   }, [screen, cursor, playlist.length, genDone, total]);
+
+  // Slide clips: restart the shown scene's loop from its first frame and
+  // pause the rest (seven looping videos would decode for nothing).
+  useEffect(() => {
+    if (USE_WAN || screen !== "film") return;
+    const shown = playlist.length > 0 ? Math.min(cursor, playlist.length - 1) : -1;
+    playlist.forEach((p, i) => {
+      const v = videoElsRef.current[p.idx];
+      if (!v) return;
+      if (i === shown) {
+        v.currentTime = 0;
+        v.play().catch(() => {});
+      } else if (!v.paused) {
+        v.pause();
+      }
+    });
+  }, [screen, cursor, playlist]);
 
   // Crossfade bookkeeping: the previous slide stays fully visible underneath
   // while the new one fades in on top (no dip to black).
@@ -794,8 +775,8 @@ export default function Home() {
   }, [screen, cursor, playlist, finalMode]);
 
   // Browsers suspend background media when the page is hidden (phone locks,
-  // app switch). Resume the music, narration, and (Wan mode) the current
-  // video when visible again — the slide driver then resnaps to the voice.
+  // app switch). Resume the music and (Wan mode) the current video when visible
+  // again.
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState !== "visible") return;
@@ -804,8 +785,6 @@ export default function Home() {
         if (m && m.paused && m.src) m.play().catch(() => {});
       }
       if (screen !== "film") return;
-      const vo = voRef.current;
-      if (vo && voStartedRef.current && vo.paused && !vo.ended) vo.play().catch(() => {});
       if (USE_WAN) {
         const v = finalMode ? filmRef.current : clipRefs.current[cursor];
         if (v && v.paused && !v.ended) v.play().catch(() => {});
@@ -817,11 +796,44 @@ export default function Home() {
 
   // ================= menu actions =================
 
+  function showToast(msg: string) {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(""), 2400);
+  }
+
+  // iPhone: Web Share sheet with the mp4 file (Save Video → camera roll).
+  // Desktop / no Web Share: plain download.
+  async function shareFilm() {
+    if (!videoUrl) {
+      showToast("Still developing — one moment");
+      return;
+    }
+    const blob = finalBlobRef.current;
+    if (blob && typeof navigator.share === "function") {
+      const file = new File([blob], "relive-childhood.mp4", { type: "video/mp4" });
+      if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: "Relive Childhood" });
+          return;
+        } catch (err: any) {
+          if (err?.name === "AbortError") return; // user closed the share sheet
+        }
+      }
+    }
+    const a = document.createElement("a");
+    a.href = videoUrl;
+    a.download = "relive-childhood.mp4";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showToast("Saved your film");
+  }
+
   function toggleMute() {
     setMuted((m) => {
       const next = !m;
       if (musicRef.current) musicRef.current.muted = next;
-      if (voRef.current) voRef.current.muted = next;
       return next;
     });
   }
@@ -831,21 +843,16 @@ export default function Home() {
     clearTimers();
     stopCam();
     musicRef.current?.pause();
-    const vo = voRef.current;
-    if (vo) {
-      vo.pause();
-      vo.removeAttribute("src");
-    }
-    voStartedRef.current = false;
-    voPartRef.current = 0;
-    voDursRef.current = [0, 0];
-    vo1BuildRef.current = null;
-    vo1SettledRef.current = false;
     blobUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
     blobUrlsRef.current = [];
+    finalBlobRef.current = null;
+    videoElsRef.current = {};
+    ripLastRef.current = 0;
+    prevMonthKeyRef.current = -1;
+    prevDecadeRef.current = -1;
+    warpSpeedRef.current = 0;
     clipRefs.current = [];
     warmRef.current = null;
-    warmScenesRef.current = [];
     arrivalRef.current = null;
     revealFiredRef.current = false;
     sessionRef.current = "";
@@ -867,8 +874,12 @@ export default function Home() {
     setGenDone(false);
     setLiveDone(false);
     setVideoUrl("");
-    setVo1Url("");
-    setVo2Url("");
+    setVideoCount(0);
+    setRips([]);
+    setDecades([]);
+    setLoadTick(0);
+    setShowShare(false);
+    setToast("");
     beginScan(runRef.current);
   }
 
@@ -885,12 +896,125 @@ export default function Home() {
   const targetTime = new Date(fromYear - yearsBack, 5, 15).getTime();
   const curDate = new Date(Date.now() - (Date.now() - targetTime) * eased);
   const curYear = curDate.getFullYear();
-  const curMonthDay = curDate.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+  const curMonthName = curDate.toLocaleDateString("en-US", { month: "long" }).toUpperCase();
+  warpSpeedRef.current = eased; // the warp canvas reads this every frame
   const travelStatus = travelP < 92 ? "Rewinding" : "Arriving";
   const cityTrim = city.trim();
   const cityLabel = cityTrim ? cityTrim.charAt(0).toUpperCase() + cityTrim.slice(1) : "your hometown";
   const cityValid = Boolean(cityTrim);
   const showMirror = screen === "scan" || screen === "city" || screen === "travel";
+
+  // TikTok-style overlay: "POV: Brambleton in 2007" — city as typed (before
+  // any comma), the childhood year the countdown lands on.
+  const povCityRaw = cityTrim.split(",")[0].trim();
+  const povCity = povCityRaw ? povCityRaw.charAt(0).toUpperCase() + povCityRaw.slice(1) : "";
+  const povYear = fromYear - yearsBack;
+  const povLine = povCity ? `POV: ${povCity} in ${povYear}` : "";
+
+  // Personalized loading lines that rotate under the travel countdown while
+  // the fleet films the first memories.
+  const loadLines = [
+    `rewinding to ${povYear}…`,
+    `finding your street in ${povCity || "your hometown"}…`,
+    `warming up the camcorder…`,
+    `developing ${povYear} memories…`,
+    `filming ${povCity || "home"} in ${povYear}…`,
+    `rewinding the tape a little further…`,
+  ];
+  const loadLine = loadLines[loadTick % loadLines.length];
+
+  // Tear-off pages: whenever the rewind crosses into an earlier month, the
+  // page that was showing rips off and flutters away. One rip per tick,
+  // lightly throttled, so the fast mid-rewind reads as a flurry of pages.
+  const monthKey = curYear * 12 + curDate.getMonth();
+  useEffect(() => {
+    if (screen !== "travel") {
+      prevMonthKeyRef.current = -1;
+      return;
+    }
+    const prev = prevMonthKeyRef.current;
+    prevMonthKeyRef.current = monthKey;
+    if (prev === -1 || monthKey >= prev) return;
+    const now = Date.now();
+    if (now - ripLastRef.current < RIP_MIN_GAP_MS) return;
+    ripLastRef.current = now;
+    const id = ripIdRef.current++;
+    const rip = {
+      id,
+      month: new Date(Math.floor(prev / 12), prev % 12, 1)
+        .toLocaleDateString("en-US", { month: "long" })
+        .toUpperCase(),
+      year: Math.floor(prev / 12),
+      z: (id % 2 ? 1 : -1) * (6 + ((id * 7) % 12)), // per-page flutter direction
+    };
+    setRips((rs) => [...rs.slice(-(MAX_RIPS - 1)), rip]);
+    setTimeout(() => setRips((rs) => rs.filter((r) => r.id !== id)), RIP_MS + 80);
+  }, [screen, monthKey]);
+
+  // Decade fly-bys: crossing back into an earlier decade sends its label
+  // zooming past — the trip reads as decades, not just dates.
+  const curDecade = Math.floor(curYear / 10) * 10;
+  useEffect(() => {
+    if (screen !== "travel") {
+      prevDecadeRef.current = -1;
+      return;
+    }
+    const prev = prevDecadeRef.current;
+    prevDecadeRef.current = curDecade;
+    if (prev === -1 || curDecade >= prev) return;
+    const id = ripIdRef.current++;
+    setDecades((ds) => [...ds.slice(-2), { id, label: `${prev}s` }]);
+    setTimeout(() => setDecades((ds) => ds.filter((d) => d.id !== id)), 1800);
+  }, [screen, curDecade]);
+
+  // Warp streaks: particles racing outward from behind the calendar — the
+  // generic "falling back through time" tunnel. Speed follows the eased
+  // travel progress, so it drifts at first and hits warp with the rewind.
+  useEffect(() => {
+    if (screen !== "travel") return;
+    const canvas = warpRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = canvas.offsetWidth;
+    const h = canvas.offsetHeight;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    ctx.scale(dpr, dpr);
+    const cx = w / 2;
+    const cy = h * 0.42;
+    const maxR = Math.hypot(cx, cy) + 40;
+    const stars = Array.from({ length: 110 }, () => ({
+      a: Math.random() * Math.PI * 2,
+      r: Math.pow(Math.random(), 0.6) * maxR,
+      w: 0.4 + Math.random() * 1.1,
+    }));
+    let raf = 0;
+    const step = () => {
+      ctx.clearRect(0, 0, w, h);
+      const sp = 0.1 + warpSpeedRef.current * 1.2;
+      for (const s of stars) {
+        const v = (0.35 + s.r * 0.012) * sp * 6;
+        const r2 = s.r + v;
+        const alpha = Math.min(0.5, 0.1 + (s.r / maxR) * 0.45) * Math.min(1, sp * 2);
+        ctx.strokeStyle = `rgba(240, 214, 180, ${alpha})`;
+        ctx.lineWidth = s.w;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(s.a) * s.r, cy + Math.sin(s.a) * s.r);
+        ctx.lineTo(cx + Math.cos(s.a) * r2, cy + Math.sin(s.a) * r2);
+        ctx.stroke();
+        if (r2 > maxR) {
+          s.r = Math.random() * 30;
+          s.a = Math.random() * Math.PI * 2;
+        } else {
+          s.r = r2;
+        }
+      }
+      raf = requestAnimationFrame(step);
+    };
+    step();
+    return () => cancelAnimationFrame(raf);
+  }, [screen]);
 
   return (
     <div
@@ -914,14 +1038,6 @@ export default function Home() {
         }}
       >
         <audio ref={musicRef} loop preload="auto" />
-        <audio
-          ref={voRef}
-          preload="auto"
-          onEnded={() => {
-            duckMusic(false);
-            setVoEndedTick((t) => t + 1);
-          }}
-        />
         <input ref={fileRef} type="file" accept="image/*" onChange={onPickFile} hidden />
 
         {/* ============ persistent live mirror (scan + city) ============ */}
@@ -1348,172 +1464,126 @@ export default function Home() {
               animation: "rcFade 0.8s ease both",
             }}
           >
-            {/* spinning golden rays */}
-            <div
+            {/* warp tunnel: streaks racing outward — falling back through
+                the decades, faster as the rewind accelerates */}
+            <canvas
+              ref={warpRef}
               style={{
                 position: "absolute",
-                top: "50%",
-                left: "50%",
-                width: 980,
-                height: 980,
-                transform: "translate(-50%, -50%)",
-                background:
-                  "conic-gradient(from 0deg, rgba(240,199,155,0) 0deg, rgba(240,199,155,0.22) 8deg, rgba(240,199,155,0) 16deg, rgba(240,199,155,0) 20deg, rgba(240,199,155,0.17) 28deg, rgba(240,199,155,0) 36deg)",
-                mixBlendMode: "screen",
-                animation: "rcSpin 22s linear infinite",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                zIndex: 0,
                 pointerEvents: "none",
               }}
             />
-            <div
-              style={{
-                position: "absolute",
-                top: "50%",
-                left: "50%",
-                width: 700,
-                height: 700,
-                transform: "translate(-50%, -50%)",
-                background:
-                  "conic-gradient(from 90deg, rgba(240,199,155,0) 0deg, rgba(240,199,155,0.14) 10deg, rgba(240,199,155,0) 22deg, rgba(240,199,155,0) 40deg, rgba(240,199,155,0.11) 50deg, rgba(240,199,155,0) 62deg)",
-                mixBlendMode: "screen",
-                animation: "rcSpinR 14s linear infinite",
-                pointerEvents: "none",
-              }}
-            />
-            {/* pulsing core glow */}
-            <div
-              style={{
-                position: "absolute",
-                top: "50%",
-                left: "50%",
-                width: 560,
-                height: 560,
-                transform: "translate(-50%, -50%)",
-                borderRadius: "50%",
-                background:
-                  "radial-gradient(circle, rgba(240,199,155,0.30), rgba(240,199,155,0) 62%)",
-                mixBlendMode: "screen",
-                animation: "rcRayPulse 3.2s ease-in-out infinite",
-                pointerEvents: "none",
-              }}
-            />
-            {/* orbiting rings */}
-            <div
-              style={{
-                position: "absolute",
-                top: "50%",
-                left: "50%",
-                width: 340,
-                height: 340,
-                transform: "translate(-50%, -50%)",
-                borderRadius: "50%",
-                border: "1px solid rgba(240,199,155,0.26)",
-                animation: "rcSpin 16s linear infinite",
-                pointerEvents: "none",
-              }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                top: "50%",
-                left: "50%",
-                width: 470,
-                height: 470,
-                transform: "translate(-50%, -50%)",
-                borderRadius: "50%",
-                border: "1px dashed rgba(240,199,155,0.18)",
-                animation: "rcSpinR 24s linear infinite",
-                pointerEvents: "none",
-              }}
-            />
-            {/* drifting sparkles */}
-            {SPARKS.map((s, i) => (
+
+            {/* decade fly-bys: crossing into an earlier decade zooms its
+                label past the camera */}
+            {decades.map((d) => (
               <div
-                key={i}
+                key={d.id}
                 style={{
                   position: "absolute",
-                  left: s.left,
-                  top: s.top,
-                  animation: `rcFloat ${s.float} ease-in-out infinite ${s.delay}`,
+                  top: "42%",
+                  left: "50%",
+                  zIndex: 1,
+                  fontFamily: SERIF,
+                  fontWeight: 700,
+                  fontSize: 210,
+                  color: "rgba(240,214,180,0.10)",
+                  letterSpacing: -6,
+                  fontVariantNumeric: "tabular-nums",
                   pointerEvents: "none",
+                  animation: "rcDecade 1.7s ease-out both",
                 }}
               >
-                <div
-                  style={{
-                    width: s.size,
-                    height: s.size,
-                    borderRadius: "50%",
-                    background: "#ffe9c8",
-                    boxShadow:
-                      "0 0 10px rgba(255,225,180,0.9), 0 0 22px rgba(240,199,155,0.5)",
-                    animation: `rcBlink ${s.blink} ease-in-out infinite ${s.delay}`,
-                  }}
-                />
+                {d.label}
               </div>
             ))}
+
             {/* brightening wash as the arrival nears (bleeds into the veil) */}
             <div
               style={{
                 position: "absolute",
                 inset: 0,
                 background:
-                  "radial-gradient(circle at 50% 46%, rgba(255,248,238,0.9), rgba(255,248,238,0) 72%)",
+                  "radial-gradient(circle at 50% 42%, rgba(255,248,238,0.9), rgba(255,248,238,0) 72%)",
                 opacity: Math.max(0, (travelP - 55) / 45) * 0.5,
                 transition: "opacity 0.4s linear",
+                zIndex: 3,
                 pointerEvents: "none",
               }}
             />
 
-            {/* memories surfacing mid-journey: finished slides pop in as
-                floating polaroids around the countdown (stills mode only) */}
-            {!USE_WAN &&
-              playlist.slice(0, POLAROID_SPOTS.length).map(({ url }, i) => {
-              const s = POLAROID_SPOTS[i];
-              return (
+            {/* the 3D tear-off calendar: the month showing rips away and
+                flutters off every time the rewind crosses into an earlier
+                month */}
+            <div
+              style={{
+                position: "relative",
+                zIndex: 2,
+                perspective: 900,
+                marginBottom: 22,
+              }}
+            >
+              <div
+                style={{
+                  position: "relative",
+                  width: 208,
+                  height: 244,
+                  transform: "rotateX(17deg)",
+                  transformStyle: "preserve-3d",
+                  filter: "drop-shadow(0 32px 30px rgba(0,0,0,0.55))",
+                }}
+              >
+                {/* spiral binding across the top */}
                 <div
-                  key={url}
                   style={{
                     position: "absolute",
-                    left: s.left,
-                    right: s.right,
-                    top: s.top,
-                    bottom: s.bottom,
-                    transform: `rotate(${s.rot}deg)`,
-                    zIndex: 1,
+                    top: -9,
+                    left: 18,
+                    right: 18,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    zIndex: 7,
                     pointerEvents: "none",
                   }}
                 >
-                  <div
-                    style={{
-                      animation: "rcPolaroidIn 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) both",
-                    }}
-                  >
+                  {Array.from({ length: 7 }, (_, i) => (
                     <div
+                      key={i}
                       style={{
-                        animation: `rcFloat ${4 + i * 0.8}s ease-in-out infinite ${i * 0.5}s`,
-                        padding: "7px 7px 22px",
-                        background: "#faf5ee",
-                        borderRadius: 3,
-                        boxShadow: "0 18px 44px -12px rgba(0,0,0,0.6)",
+                        width: 7,
+                        height: 17,
+                        borderRadius: 4,
+                        background: "linear-gradient(#e6e6e6, #7c7c7c)",
+                        boxShadow: "0 1px 1px rgba(0,0,0,0.4)",
                       }}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={url}
-                        alt=""
-                        style={{
-                          width: 92,
-                          height: 122,
-                          objectFit: "cover",
-                          display: "block",
-                          borderRadius: 2,
-                          background: "#241c2e",
-                        }}
-                      />
-                    </div>
-                  </div>
+                    />
+                  ))}
                 </div>
-              );
-            })}
+                {/* the page currently showing */}
+                <CalendarPage month={curMonthName} year={curYear} />
+                {/* pages mid-tear, folding down off the top edge */}
+                {rips.map((r) => (
+                  <div
+                    key={r.id}
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      zIndex: 8,
+                      transformOrigin: "top center",
+                      ["--rz" as string]: `${r.z}deg`,
+                      animation: "rcRip 0.75s cubic-bezier(0.42,0,0.72,1) both",
+                      pointerEvents: "none",
+                    } as React.CSSProperties}
+                  >
+                    <CalendarPage month={r.month} year={r.year} />
+                  </div>
+                ))}
+              </div>
+            </div>
 
             <div style={{ position: "relative", textAlign: "center", zIndex: 2 }}>
               <div
@@ -1529,42 +1599,31 @@ export default function Home() {
               </div>
               <div
                 style={{
-                  fontFamily: SERIF,
-                  fontStyle: "italic",
-                  fontSize: 27,
-                  color: "#f0c79b",
-                  marginTop: 18,
-                  fontVariantNumeric: "tabular-nums",
-                  textShadow: "0 0 24px rgba(240,199,155,0.4)",
-                }}
-              >
-                {curMonthDay}
-              </div>
-              <div
-                style={{
-                  fontFamily: SERIF,
-                  fontSize: 124,
-                  lineHeight: 0.94,
-                  color: "#fff",
-                  letterSpacing: -2,
-                  margin: "4px 0 8px",
-                  fontVariantNumeric: "tabular-nums",
-                  textShadow: "0 0 46px rgba(255,235,205,0.4)",
-                }}
-              >
-                {curYear}
-              </div>
-              <div
-                style={{
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 14,
+                  marginTop: 14,
                   fontWeight: 400,
                   fontSize: 16,
                   color: "rgba(255,255,255,0.66)",
                 }}
               >
                 <span>{cityLabel}</span>
+              </div>
+              {/* rotating personalized loading line — the wait is part of
+                  the show while the fleet films the first memories */}
+              <div
+                key={loadLine}
+                style={{
+                  marginTop: 20,
+                  fontFamily: SERIF,
+                  fontStyle: "italic",
+                  fontSize: 15,
+                  color: "rgba(255,255,255,0.5)",
+                  animation: "rcFade 0.6s ease both",
+                }}
+              >
+                {loadLine}
               </div>
             </div>
           </div>
@@ -1578,20 +1637,41 @@ export default function Home() {
               // one fades in over the previous (no dip to black) and gets a
               // fresh, endlessly drifting Ken Burns run while it's showing —
               // during waits it never freezes.
-              playlist.map(({ url }, i) => {
+              playlist.map((p, i) => {
                 const isShown = i === shownIdx;
                 const isPrev = i === prevIdx && prevIdx !== shownIdx;
-                return (
+                const layer: React.CSSProperties = {
+                  ...FULL_BLEED,
+                  zIndex: isShown ? 2 : isPrev ? 1 : 0,
+                  opacity: isShown || isPrev ? 1 : 0,
+                  transition: "opacity 0.45s ease",
+                };
+                // A scene that has its Wan clip plays real motion; until then
+                // the still drifts.
+                return p.video ? (
+                  <video
+                    key={p.video}
+                    ref={(el) => {
+                      videoElsRef.current[p.idx] = el;
+                    }}
+                    src={p.video}
+                    muted
+                    loop
+                    playsInline
+                    autoPlay={isShown}
+                    style={{
+                      ...layer,
+                      animation: isShown ? "rcFade 0.45s ease both" : "none",
+                    }}
+                  />
+                ) : (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    key={url}
-                    src={url}
+                    key={p.url}
+                    src={p.url}
                     alt=""
                     style={{
-                      ...FULL_BLEED,
-                      zIndex: isShown ? 2 : isPrev ? 1 : 0,
-                      opacity: isShown || isPrev ? 1 : 0,
-                      transition: "opacity 0.45s ease",
+                      ...layer,
                       animation: isShown
                         ? `${KEN_ANIMS[i % KEN_ANIMS.length]} 7s ease-in-out infinite alternate, rcFade 0.45s ease both`
                         : "none",
@@ -1651,7 +1731,32 @@ export default function Home() {
               </>
             )}
 
-            {/* mute + share buttons */}
+            {/* TikTok-style POV line — also burned into the shared mp4 */}
+            {povLine && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "11%",
+                  left: 0,
+                  right: 0,
+                  zIndex: 5,
+                  textAlign: "center",
+                  pointerEvents: "none",
+                  fontFamily: SANS,
+                  fontWeight: 800,
+                  fontSize: 27,
+                  letterSpacing: 0.2,
+                  color: "#fff",
+                  textShadow:
+                    "-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, 0 3px 0 #000, 0 6px 22px rgba(0,0,0,0.55)",
+                  animation: "rcRise 0.9s ease both",
+                }}
+              >
+                {povLine}
+              </div>
+            )}
+
+            {/* mute + share + start-over buttons */}
             <button
               onClick={toggleMute}
               aria-label={muted ? "Unmute" : "Mute"}
@@ -1682,7 +1787,7 @@ export default function Home() {
               style={{
                 position: "absolute",
                 top: 22,
-                right: 20,
+                right: 124,
                 zIndex: 6,
                 width: 44,
                 height: 44,
@@ -1700,9 +1805,144 @@ export default function Home() {
             >
               <RestartIcon />
             </button>
+            <button
+              onClick={() => setShowShare(true)}
+              aria-label="Share"
+              style={{
+                position: "absolute",
+                top: 22,
+                right: 20,
+                zIndex: 6,
+                width: 44,
+                height: 44,
+                border: "none",
+                cursor: "pointer",
+                borderRadius: "50%",
+                background: "rgba(20,16,26,0.32)",
+                backdropFilter: "blur(10px)",
+                WebkitBackdropFilter: "blur(10px)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#fff",
+              }}
+            >
+              <ShareIcon />
+            </button>
 
-            {/* No progress/waiting pills or popups here, ever — the film is
-                a live experience and must always feel live. */}
+            {/* No progress/waiting pills on the film — the only transient
+                pill is share feedback */}
+            {toast && <Pill text={toast} />}
+
+            {/* share sheet — pops up after the first full playthrough */}
+            {showShare && (
+              <div
+                onClick={() => setShowShare(false)}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  zIndex: 8,
+                  background: "rgba(5,4,9,0.5)",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "flex-end",
+                  animation: "rcFade 0.25s ease both",
+                }}
+              >
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    margin: "0 14px 18px",
+                    borderRadius: 28,
+                    padding: "28px 22px 12px",
+                    textAlign: "center",
+                    background: "rgba(24,18,30,0.82)",
+                    backdropFilter: "blur(24px)",
+                    WebkitBackdropFilter: "blur(24px)",
+                    boxShadow:
+                      "0 24px 60px -16px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.08)",
+                    animation: "rcSheet 0.45s cubic-bezier(0.22, 1, 0.36, 1) both",
+                  }}
+                >
+                  <div style={{ fontFamily: SERIF, fontSize: 30, color: "#faf5ee" }}>
+                    Share your <span style={{ fontStyle: "italic", color: "#f0c79b" }}>memory</span>
+                  </div>
+                  <div
+                    style={{
+                      marginTop: 8,
+                      fontWeight: 300,
+                      fontSize: 13.5,
+                      lineHeight: 1.5,
+                      color: "rgba(255,255,255,0.55)",
+                    }}
+                  >
+                    {videoUrl
+                      ? "Save it to your camera roll or send it to someone who was there."
+                      : "Your film is still developing — the button lights up when it's ready."}
+                  </div>
+                  <button
+                    onClick={shareFilm}
+                    style={{
+                      marginTop: 20,
+                      width: "100%",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: 17,
+                      borderRadius: 100,
+                      fontFamily: SANS,
+                      fontWeight: 600,
+                      fontSize: 15,
+                      color: "#171019",
+                      background: "#fff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 9,
+                      opacity: videoUrl ? 1 : 0.5,
+                      boxShadow: "0 14px 40px -12px rgba(255,255,255,0.35)",
+                    }}
+                  >
+                    <ShareIcon size={17} />
+                    Share film
+                  </button>
+                  <button
+                    onClick={restart}
+                    style={{
+                      marginTop: 10,
+                      width: "100%",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                      cursor: "pointer",
+                      padding: 15,
+                      borderRadius: 100,
+                      fontFamily: SANS,
+                      fontWeight: 500,
+                      fontSize: 14.5,
+                      color: "#faf5ee",
+                      background: "rgba(255,255,255,0.06)",
+                    }}
+                  >
+                    Start over
+                  </button>
+                  <button
+                    onClick={() => setShowShare(false)}
+                    style={{
+                      marginTop: 4,
+                      width: "100%",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: 12,
+                      background: "transparent",
+                      color: "rgba(255,255,255,0.45)",
+                      fontFamily: SANS,
+                      fontWeight: 500,
+                      fontSize: 13,
+                    }}
+                  >
+                    Keep watching
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1763,6 +2003,55 @@ export default function Home() {
         )}
       </div>
     </div>
+  );
+}
+
+function Pill({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: "50%",
+        bottom: 40,
+        transform: "translateX(-50%)",
+        zIndex: 6,
+        padding: "12px 22px",
+        borderRadius: 100,
+        background: "rgba(24,18,30,0.72)",
+        backdropFilter: "blur(16px)",
+        WebkitBackdropFilter: "blur(16px)",
+        color: "#faf5ee",
+        fontFamily: SANS,
+        fontWeight: 500,
+        fontSize: 14,
+        whiteSpace: "nowrap",
+        boxShadow: "0 14px 34px -12px rgba(0,0,0,0.5)",
+        animation: "rcFade 0.3s ease both",
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
+// iOS-style share glyph: arrow rising out of a tray.
+function ShareIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.9}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 3v12" />
+      <path d="M8 6.5 12 3l4 3.5" />
+      <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
+    </svg>
   );
 }
 
