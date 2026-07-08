@@ -18,6 +18,7 @@
 // the legacy pure-clip path.
 
 import { useEffect, useRef, useState } from "react";
+import { upload } from "@vercel/blob/client";
 
 type Moment = {
   title: string;
@@ -858,15 +859,17 @@ export default function Home() {
     if (clips.some((clip) => !clip)) return false;
     const readyClips = clips as Blob[];
 
-    // Vercel hard-caps request bodies at ~4.5MB. Attempt the server stitch
-    // whenever the clips plausibly fit (leaving headroom for the multipart
-    // overhead + POV PNG); only skip to the browser render when they clearly
-    // won't, to avoid a slow doomed upload.
+    // The server ffmpeg stitch is the fast, works-everywhere path. Vercel
+    // hard-caps request bodies at ~4.5MB, so small films ride directly in the
+    // stitch POST; bigger films upload their clips to Blob storage first (no
+    // cap) and the stitch route pulls them from there. Either way the phone
+    // never has to real-time-record anything.
     const totalBytes = readyClips.reduce((sum, clip) => sum + clip.size, 0);
-    const serverStitchViable = totalBytes < 4_200_000;
+    const fitsInBody = totalBytes < 4_200_000;
 
-    if (serverStitchViable) {
-      try {
+    try {
+      let sr: Response;
+      if (fitsInBody) {
         const form = new FormData();
         form.set("sessionId", sessionId);
         form.set("indices", JSON.stringify(indices));
@@ -875,18 +878,45 @@ export default function Home() {
         indices.forEach((index, k) => {
           form.append(`clip-${index}`, readyClips[k], `clip-${index}.mp4`);
         });
-        const sr = await fetch("/api/stitch", { method: "POST", body: form });
-        const sd = await sr.json().catch(() => ({}));
-        if (!sr.ok) throw new Error(sd.error || "Stitch failed");
-        const blob = await fetch(sd.videoUrl).then((r) => {
-          if (!r.ok) throw new Error("Rendered film missing");
-          return r.blob();
-        });
+        sr = await fetch("/api/stitch", { method: "POST", body: form });
+      } else {
+        const uploads = await Promise.all(
+          indices.map(async (index, k) => {
+            const put = await upload(
+              `share/${sessionId}/clip-${index}.mp4`,
+              readyClips[k],
+              {
+                access: "private",
+                handleUploadUrl: "/api/share-upload",
+                contentType: "video/mp4",
+              },
+            );
+            return { index, url: put.url };
+          }),
+        );
         if (runRef.current !== run) return false;
-        setFinalShareBlob(blob, "mp4");
-        return true;
-      } catch {}
-    }
+        sr = await fetch("/api/stitch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            indices,
+            mode: "hybrid",
+            povImage,
+            clipUrls: uploads,
+          }),
+        });
+      }
+      const sd = await sr.json().catch(() => ({}));
+      if (!sr.ok) throw new Error(sd.error || "Stitch failed");
+      const blob = await fetch(sd.videoUrl).then((r) => {
+        if (!r.ok) throw new Error("Rendered film missing");
+        return r.blob();
+      });
+      if (runRef.current !== run) return false;
+      setFinalShareBlob(blob, "mp4");
+      return true;
+    } catch {}
 
     try {
       const rendered = await renderFilmInBrowser(
