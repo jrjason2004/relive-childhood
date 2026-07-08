@@ -767,26 +767,35 @@ export default function Home() {
     if (clips.some((clip) => !clip)) return false;
     const readyClips = clips as Blob[];
 
-    try {
-      const form = new FormData();
-      form.set("sessionId", sessionId);
-      form.set("indices", JSON.stringify(indices));
-      form.set("mode", "hybrid");
-      form.set("povImage", povImage);
-      indices.forEach((index, k) => {
-        form.append(`clip-${index}`, readyClips[k], `clip-${index}.mp4`);
-      });
-      const sr = await fetch("/api/stitch", { method: "POST", body: form });
-      const sd = await sr.json().catch(() => ({}));
-      if (!sr.ok) throw new Error(sd.error || "Stitch failed");
-      const blob = await fetch(sd.videoUrl).then((r) => {
-        if (!r.ok) throw new Error("Rendered film missing");
-        return r.blob();
-      });
-      if (runRef.current !== run) return false;
-      setFinalShareBlob(blob, "mp4");
-      return true;
-    } catch {}
+    // Vercel hard-caps request bodies at 4.5MB. Seven Wan clips usually
+    // exceed that, so on the deployed app the upload would burn seconds just
+    // to fail with 413 before falling back — skip straight to the browser
+    // render instead of attempting a doomed round-trip.
+    const totalBytes = readyClips.reduce((sum, clip) => sum + clip.size, 0);
+    const serverStitchViable = totalBytes < 4_000_000;
+
+    if (serverStitchViable) {
+      try {
+        const form = new FormData();
+        form.set("sessionId", sessionId);
+        form.set("indices", JSON.stringify(indices));
+        form.set("mode", "hybrid");
+        form.set("povImage", povImage);
+        indices.forEach((index, k) => {
+          form.append(`clip-${index}`, readyClips[k], `clip-${index}.mp4`);
+        });
+        const sr = await fetch("/api/stitch", { method: "POST", body: form });
+        const sd = await sr.json().catch(() => ({}));
+        if (!sr.ok) throw new Error(sd.error || "Stitch failed");
+        const blob = await fetch(sd.videoUrl).then((r) => {
+          if (!r.ok) throw new Error("Rendered film missing");
+          return r.blob();
+        });
+        if (runRef.current !== run) return false;
+        setFinalShareBlob(blob, "mp4");
+        return true;
+      } catch {}
+    }
 
     try {
       const rendered = await renderFilmInBrowser(
@@ -961,11 +970,15 @@ export default function Home() {
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [screen, cursor, finalMode]);
 
+  // The share sheet pops as soon as the first pass ends — even if the
+  // export is still rendering, the sheet says "still developing" and the
+  // Share button lights up when videoUrl lands. Waiting for videoUrl here
+  // made the sheet never appear when the export was slow.
   useEffect(() => {
-    if (screen !== "film" || !liveDone || !videoUrl || shareAutoOpenedRef.current) return;
+    if (screen !== "film" || !liveDone || shareAutoOpenedRef.current) return;
     shareAutoOpenedRef.current = true;
     setShowShare(true);
-  }, [screen, liveDone, videoUrl]);
+  }, [screen, liveDone]);
 
   // ================= menu actions =================
 
