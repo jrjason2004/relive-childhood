@@ -56,10 +56,11 @@ function smootherStep(t: number): number {
 }
 
 function travelDateEase(t: number): number {
-  const p = Math.max(0, Math.min(1, t));
-  // Fast launch, soft landing: the rewind should immediately feel like time
-  // travel, then slow down as it arrives in childhood.
-  return 1 - (1 - p) * (1 - p);
+  // Linear: the date rewinds at a constant rate the whole way — no
+  // slow-to-fast or fast-to-slow ramp. (inverseTravelDateEase, the year
+  // flash windows, and everything derived stay consistent because they all
+  // invert this same function.)
+  return Math.max(0, Math.min(1, t));
 }
 
 function travelWarpSpeed(t: number): number {
