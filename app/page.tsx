@@ -408,6 +408,7 @@ export default function Home() {
   const [muted, setMuted] = useState(false);
 
   const mirrorRef = useRef<HTMLVideoElement>(null);
+  const mirrorCanvasRef = useRef<HTMLCanvasElement>(null);
   const filmRef = useRef<HTMLVideoElement>(null);
   const clipRefs = useRef<Array<HTMLVideoElement | null>>([]);
   const musicRef = useRef<HTMLAudioElement>(null);
@@ -477,23 +478,43 @@ export default function Home() {
     setCamReady(false);
   }
 
-  // iOS Low Power Mode rejects the async play() after getUserMedia and can
-  // suspend a running stream when the screen dims. While the scan screen is
-  // up, keep nudging the mirror back to life: retry on an interval, on any
-  // touch (a user gesture always satisfies the autoplay policy), and when the
-  // tab regains focus.
+  // Paint the camera onto the visible mirror canvas every frame. The raw
+  // <video> stays hidden (WebKit's Low Power Mode overlay renders inside it),
+  // so this loop is the mirror. It also keeps nudging a suspended video back
+  // to life — LPM rejects the async play() after getUserMedia and can pause
+  // a running stream when the screen dims; touches are user gestures that
+  // always satisfy the autoplay policy.
   useEffect(() => {
-    if (screen !== "scan") return;
+    if (screen !== "scan" && screen !== "city" && screen !== "travel") return;
+    let raf = 0;
+    let lastKick = 0;
+    const tick = (now: number) => {
+      const v = mirrorRef.current;
+      const c = mirrorCanvasRef.current;
+      if (v && streamRef.current && v.paused && now - lastKick > 800) {
+        lastKick = now;
+        v.play().catch(() => {});
+      }
+      if (v && c && v.videoWidth > 0 && !v.paused) {
+        if (c.width !== v.videoWidth || c.height !== v.videoHeight) {
+          c.width = v.videoWidth;
+          c.height = v.videoHeight;
+        }
+        c.getContext("2d")?.drawImage(v, 0, 0, c.width, c.height);
+        setCamReady(true);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
     const kick = () => {
       const v = mirrorRef.current;
       if (v && streamRef.current && v.paused) v.play().catch(() => {});
     };
-    const id = setInterval(kick, 800);
     window.addEventListener("pointerdown", kick);
     window.addEventListener("touchend", kick);
     document.addEventListener("visibilitychange", kick);
     return () => {
-      clearInterval(id);
+      cancelAnimationFrame(raf);
       window.removeEventListener("pointerdown", kick);
       window.removeEventListener("touchend", kick);
       document.removeEventListener("visibilitychange", kick);
@@ -1384,26 +1405,32 @@ export default function Home() {
                   crops — it fills the screen without the zoom. (The zoom bug
                   was the forced 9/16 aspectRatio constraint cropping the
                   sensor at the source; that's gone from getUserMedia.) */}
+              {/* The raw <video> is never shown: in iOS Low Power Mode WebKit
+                  paints its own play/pause overlay on <video> elements inside
+                  a shadow layer page CSS can't reach (the "stray button").
+                  The video only decodes the stream; the canvas below is the
+                  visible mirror — a canvas has no native media UI, ever. */}
               <video
                 ref={mirrorRef}
                 autoPlay
                 muted
                 playsInline
-                onPlaying={() => setCamReady(true)}
-                // iOS Low Power Mode suspends the stream mid-scan and paints
-                // its play/pause overlay on the (mirrored) frozen frame — hide
-                // the element whenever it isn't actively playing, and never
-                // let taps reach the native control.
-                onPause={() => setCamReady(false)}
-                onSuspend={() => setCamReady(false)}
-                onWaiting={() => setCamReady(false)}
+                style={{
+                  position: "absolute",
+                  width: 2,
+                  height: 2,
+                  opacity: 0.001,
+                  pointerEvents: "none",
+                }}
+              />
+              <canvas
+                ref={mirrorCanvasRef}
                 style={{
                   ...FULL_BLEED,
                   transform: "scaleX(-1)",
                   pointerEvents: "none",
-                  // Invisible until the camera is actually playing — an empty
-                  // <video> otherwise shows the browser's native play button.
                   opacity: camReady ? 0.94 : 0,
+                  transition: "opacity 0.4s ease",
                 }}
               />
             </div>
