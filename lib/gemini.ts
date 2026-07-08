@@ -117,11 +117,11 @@ CRITICAL — era accuracy for real places. This person will instantly notice an 
 For each of the 7, return:
 - "title": short punchy name
 - "description": 1-2 sentences on the specific childhood activity and why doing it at this local place was nostalgic for this place + era
-- "imagePrompt": a SHORT clause (about 5-12 words) naming ONLY what the child is doing with the iconic era-defining object — nothing else. It gets dropped into "A first-person POV photo, <skin tone> skinned child, <imagePrompt>. In the attached scene." so start with a verb phrase like two hands holding/gripping/pointing/kicking/trading/playing.
+- "imagePrompt": a SHORT clause (about 5-12 words) naming ONLY what the child's hands are doing with the iconic era-defining object — nothing else. It gets dropped into "A first-person POV photo, <skin tone> skinned child hands <imagePrompt>. In the attached scene." so it must read naturally after the word "hands" — start with a verb like clutching/holding/gripping/pointing/trading (NOT "two hands ...").
   The object must be the scene's era anchor — the generation-defining toy, game, gadget, or ritual (see the nostalgic action requirement) — named with its exact era-defining variety, edition, title, or model, because the item is what pins the year. Spend about 5-7 words naming it precisely, but no more (don't over-describe). If it's Pokémon cards, say which set/era (e.g. "holographic 1999 Base Set Pokémon cards", NOT just "Pokémon cards"). If it's a movie/game/console, name the real era model/title from ${childhoodSpan} (e.g. "a white Wii Remote", "a Blockbuster VHS of The Lion King", "a boxed Nintendo 64 GoldenEye cartridge"), NOT just "a movie" / "a game".
   NEVER name or append the location — no "at <place>", no venue/pool/store/theater/park name — the attached reference photo already shows where it is. Also no camera, lighting, people, or era words.
-  RIGHT: "two hands pointing a white Wii Remote at the TV"
-  RIGHT: "kicking a silver Razor scooter down the sidewalk"
+  RIGHT: "pointing a white Wii Remote at the TV"
+  RIGHT: "clutching a new Skylanders: Giants figure in its packaging"
   RIGHT: "clutching holographic 1999 Base Set Pokémon cards"
   WRONG: "holding a handful of concession stand fries" (food is not an era anchor), "holding some Pokémon cards" (too vague — no era), "...at Brambleton Community Center Pool" (names the place)
 - "videoPrompt": how this still comes alive as a 4-second clip — subtle, realistic motion from the low child's-eye view while the kid continues the nostalgic activity: hands move, friends shift, an arcade screen flickers, a snack drips, tickets flutter, a ball rolls, a bike coasts, or the child gently walks forward. Keep the verified local anchor visible. No scene cuts.
@@ -250,10 +250,10 @@ export async function generateImage(
 ): Promise<{ mimeType: string; data: string }> {
   const model = process.env.GEMINI_IMAGE_MODEL || "gemini-3-pro-image";
 
-  const child = `${skinTone} skinned child`;
+  const child = `${skinTone} skinned child hands`;
   const fullPrompt = ref
-    ? `A first-person POV photo, ${child}, ${activity}. In the attached scene.`
-    : `A first-person POV photo, ${child}, ${activity}${fallbackScene ? `, at ${fallbackScene}` : ""}.`;
+    ? `A first-person POV photo, ${child} ${activity}. In the attached scene.`
+    : `A first-person POV photo, ${child} ${activity}${fallbackScene ? `, at ${fallbackScene}` : ""}.`;
 
   const parts: any[] = [{ text: fullPrompt }];
   if (ref) parts.push({ inlineData: { mimeType: ref.mimeType, data: ref.data } });
