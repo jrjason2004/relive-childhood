@@ -28,12 +28,14 @@ verified: 2026-07-07
 
 # Share film render
 
-The shareable file is 7 scenes by 2 seconds, `720x1280`, hard cuts, music as the only audio, POV text burned into the frame. The primary path is the **live-pass recorder** in [[app/page.tsx]]: when the film reveals, a hidden 720x1280 canvas mirrors the on-screen scene each frame (`shownVideoElRef` + `drawCover` + `drawPovText`) into a `MediaRecorder` with the prefetched session track mixed from 0:00; the recorder stops when the first pass ends (`liveDone`), so the file is ready the instant the share sheet pops. A blob under 200KB is treated as a dud (stalled/backgrounded tab) and falls through.[@page]
+The shareable file is 7 scenes by 2 seconds, `720x1280`, hard cuts, music as the only audio, POV text burned into the frame. `renderShareFilm()` in [[app/page.tsx]] is kicked at `genDone` (in parallel with the live pass, so it is usually ready by the time the share sheet pops) with a two-step chain:
 
-`renderShareFilm()` is the fallback chain when recording is unsupported or produced a dud:
+1. **Server ffmpeg stitch — the reliable, browser-agnostic primary.** The client uploads its clip blobs via `FormData` to [[app/api/stitch/route.ts]] as `clip-{index}` parts and `stitchHybrid()` in [[lib/video.ts]] runs `concat`, overlays the POV PNG, and trims `public/music/childhood-1.mp3` to length. Attempted whenever the clips total under ~4.2MB (Vercel caps request bodies at ~4.5MB; leave headroom for multipart + POV PNG). Produces a real mp4 that shares/downloads on any browser.[@route][@video]
+2. **In-browser render — last resort.** `renderFilmInBrowser()` plays the clips into a canvas + `MediaRecorder` in real time. `finalFileExtRef` tracks the extension.[@page]
 
-1. **Server ffmpeg stitch — only when the clips total under 4MB.** Vercel caps request bodies at 4.5MB; seven Wan clips usually exceed it, so the upload is skipped entirely rather than burning seconds to a 413. When viable, the client uploads clip blobs via `FormData` to [[app/api/stitch/route.ts]] as `clip-{index}` parts and `stitchHybrid()` in [[lib/video.ts]] runs `concat`, overlays the POV PNG, and trims `public/music/childhood-1.mp3` to length.[@route][@video]
-2. **In-browser render.** `renderFilmInBrowser()` plays the clips into a canvas + `MediaRecorder` in real time (~15s). `finalFileExtRef` tracks which extension the share sheet offers.[@page]
+A **live-pass canvas recorder was tried as the primary** (record exactly what plays) and removed: `canvas.captureStream()` + `MediaRecorder` yields empty/dud recordings in Safari and other environments (headless Chromium produced ~1.7KB for 1.2s of animation), so the 200KB dud guard tripped and the in-browser fallback — which uses the same fragile API — failed too, leaving the Share button stuck grayed (`opacity: videoUrl ? 1 : 0.5`). The server stitch avoids that whole class of failure.
+
+**Open risk:** if seven Wan clips exceed ~4.2MB total, the server stitch is skipped and only the fragile in-browser render remains — so the button can still gray out on Safari. The definitive fix is Vercel Blob (upload clips to Blob, stitch from there, no 4.5MB body cap); not yet built.
 
 The share sheet auto-opens at the end of the first pass regardless of export state ("still developing" copy; the button lights when `videoUrl` lands) — gating the auto-open on `videoUrl` was a bug that made the sheet never appear when the export ran long.[@page]
 
