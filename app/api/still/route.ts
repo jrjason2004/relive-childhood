@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
-import { generateImage } from "@/lib/gemini";
+import { generateImage, filterRelevantRefs } from "@/lib/gemini";
 import { fetchReferenceImages, type RefImage } from "@/lib/refimages";
 import { saveStill, composeRealSlide, stillPath } from "@/lib/video";
 
@@ -24,7 +24,15 @@ export async function POST(req: Request) {
     let refs: RefImage[] = [];
     if (referenceQuery) {
       try {
-        refs = await fetchReferenceImages(referenceQuery, mode === "real" ? 6 : 3);
+        // Fetch a wider batch, then keep only candidates a vision check
+        // confirms actually depict the queried subject — scrapers sometimes
+        // return confident garbage (unrelated clipart, maps, wrong places),
+        // and junk refs poison the generated scene. Zero refs beats bad refs.
+        const candidates = await fetchReferenceImages(referenceQuery, 6);
+        refs = (await filterRelevantRefs(referenceQuery, candidates)).slice(
+          0,
+          mode === "real" ? 6 : 3,
+        );
       } catch {
         // proceed without references rather than failing the whole still
       }

@@ -33,6 +33,8 @@ Nano Banana stills are grounded with real photos of the researched local places 
 
 Every provider throws or returns `[]`; `fetchReferenceImages()` degrades to ungrounded generation, so a run never breaks over references.[@refimages]
 
+**Every candidate is verified before it reaches Nano Banana.** The scrapers sometimes "succeed" with confident garbage: a Bing scrape for "Ashburn Farm Market Virginia 1990s storefront" returned 24 tiles of Slovakia (Bratislava castle, country maps) with a clean 200, and those composited straight into generated scenes as clipart and wrong-country maps. `filterRelevantRefs()` in [[lib/gemini.ts]] sends the candidate batch plus the query to gemini-2.5-flash (temperature 0, thinking budget 0) and keeps only real photographs that plausibly depict the subject; cartoons, maps, logos, and wrong-place photos are dropped. [[app/api/still/route.ts]] fetches 6 candidates and keeps up to 3 verified. On filter failure it returns zero refs — a prompt-only scene beats a garbage-grounded one. Logged as `[gemini:reffilter]` with candidate/kept counts.[@gemini][@route]
+
 The incident observability hooks remain in code. [[app/api/still/route.ts]] sets an `x-ref-count` response header, [[lib/refimages.ts]] logs `provider_failed`, `provider_result`, and `no_refs`, and [[lib/gemini.ts]] logs the reference count and inline image-part count before it calls Nano Banana.[@route][@refimages][@gemini]
 
 Candidate URLs are downloaded in a parallel batch, filtered to raster formats Nano Banana accepts, and capped at 8 MB.[@refimages]

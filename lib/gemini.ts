@@ -178,6 +178,62 @@ function parseMoments(text: string): Moment[] {
   }
 }
 
+// Keep only reference candidates that actually depict the queried subject.
+// The scrapers sometimes "succeed" with completely unrelated tiles (a Bing
+// query for an Ashburn storefront once returned castles and maps of
+// Slovakia); Nano Banana composites whatever it's handed, so junk refs
+// poison the scene. One cheap flash-vision call filters them. On any doubt
+// or failure this returns fewer/zero refs — a prompt-only scene always beats
+// a garbage-grounded one.
+export async function filterRelevantRefs(query: string, refs: RefImage[]): Promise<RefImage[]> {
+  if (refs.length === 0) return refs;
+  const model = process.env.GEMINI_VISION_MODEL || "gemini-2.5-flash";
+  const parts: any[] = [];
+  refs.forEach((r, i) => {
+    parts.push({ text: `Image ${i + 1}:` });
+    parts.push({ inlineData: { mimeType: r.mimeType, data: r.data } });
+  });
+  parts.push({
+    text: `These images came from an image search for: "${query}".
+Which of them are REAL PHOTOGRAPHS that plausibly depict that subject (the actual place, object, or scene — any era, archival is fine)? Reject cartoons, clipart, illustrations, logos, maps, charts, diagrams, website screenshots, watermarked stock previews, and photos of unrelated places or things.
+Return ONLY a JSON array of the qualifying image numbers, e.g. [1,3]. If none qualify, return [].`,
+  });
+  try {
+    const res = await fetch(`${API_ROOT}/${model}:generateContent?key=${key()}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts }],
+        generationConfig: { temperature: 0, thinkingConfig: { thinkingBudget: 0 } },
+      }),
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`Gemini ref filter ${res.status}`);
+    const json = await res.json();
+    const text: string =
+      json?.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") ?? "";
+    // The reply can be chatty — take the LAST bracketed array, which is the
+    // verdict ("...here's why... Therefore: [1,3]").
+    const arrays = [...text.matchAll(/\[[\d,\s]*\]/g)];
+    if (arrays.length === 0) throw new Error("no JSON array in ref filter reply");
+    const picked = (JSON.parse(arrays[arrays.length - 1][0]) as unknown[])
+      .map(Number)
+      .filter((n) => Number.isInteger(n) && n >= 1 && n <= refs.length);
+    const kept = refs.filter((_, i) => picked.includes(i + 1));
+    console.info("[gemini:reffilter]", {
+      query: query.length > 100 ? `${query.slice(0, 97)}...` : query,
+      candidates: refs.length,
+      kept: kept.length,
+    });
+    return kept;
+  } catch (err) {
+    console.warn("[gemini:reffilter] failed — generating ungrounded", {
+      error: err instanceof Error ? err.message : "unknown",
+    });
+    return [];
+  }
+}
+
 export async function generateImage(
   imagePrompt: string,
   refs: RefImage[],
