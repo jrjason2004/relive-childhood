@@ -419,12 +419,15 @@ export default function Home() {
   async function startCam(): Promise<boolean> {
     if (streamRef.current) return true;
     try {
+      // Ask for the camera's native, widest field of view (soft ideals —
+      // phones still deliver portrait frames). Forcing a portrait
+      // aspectRatio here made macOS center-crop the landscape sensor, which
+      // compounded with the display crop into a "way too zoomed in" mirror.
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: "user",
-          width: { ideal: 720 },
-          height: { ideal: 1280 },
-          aspectRatio: { ideal: 9 / 16 },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
         },
         audio: false,
       });
@@ -1302,13 +1305,37 @@ export default function Home() {
                 overflow: "hidden",
               }}
             >
-              <video
-                ref={mirrorRef}
-                autoPlay
-                muted
-                playsInline
-                style={{ ...FULL_BLEED, transform: "scaleX(-1)", opacity: 0.94 }}
-              />
+              {/* Full-width 4:5 window instead of full-bleed: covering the
+                  whole ~1:2 phone frame with a 16:9 webcam kept only ~28% of
+                  its horizontal field of view — a face filled the screen.
+                  This window shows ~1.6x more; the vignette below blends its
+                  edges into the backdrop. Centered on 40% to align with the
+                  scan reticle. */}
+              <div
+                style={{
+                  position: "absolute",
+                  top: "40%",
+                  left: 0,
+                  right: 0,
+                  transform: "translateY(-50%)",
+                  aspectRatio: "4 / 5",
+                  overflow: "hidden",
+                }}
+              >
+                <video
+                  ref={mirrorRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    transform: "scaleX(-1)",
+                    opacity: 0.94,
+                  }}
+                />
+              </div>
             </div>
             <div
               style={{
