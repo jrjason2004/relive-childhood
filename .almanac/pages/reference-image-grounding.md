@@ -24,12 +24,13 @@ verified: 2026-07-07
 
 # Reference image grounding
 
-Nano Banana stills are grounded with real photos of the researched local places so signage and architecture match reality. [[lib/refimages.ts]] fetches them through a provider chain where the first provider that yields images wins.[@refimages]
+Nano Banana stills are grounded with real photos of the researched local places so signage and architecture match reality. [[lib/refimages.ts]] fetches them through a provider chain where the first provider that yields images wins. Keyed providers lead because they return real Google Images results and are reliable on Vercel; the keyless scrapers trail.[@refimages]
 
-1. **DuckDuckGo images** via the unofficial `vqd` plus `i.js` flow. This worked from the developer machine and failed from Vercel with `DDG vqd token not found`, which is why the fallback chain matters.[@refimages]
-2. **Bing Images HTML scrape** via `murl` extraction. This is the practical production fallback when DuckDuckGo is blocked.[@refimages]
-3. **Google Programmable Search** only when `GOOGLE_CSE_KEY` and `GOOGLE_CSE_CX` are set.[@refimages]
-4. **SerpAPI** only when `SERPAPI_KEY` is set.[@refimages]
+1. **Serper.dev** (`POST google.serper.dev/images`, `X-API-KEY`, maps `images[].imageUrl`) when `SERPER_API_KEY` is set — the primary provider in production, chosen for cost (~$0.001/search vs SerpAPI's $0.01–0.025; Google Custom Search is closed to new customers and sunsets 2027-01-01).[@refimages]
+2. **Google Programmable Search** when `GOOGLE_CSE_KEY` and `GOOGLE_CSE_CX` are set (legacy; unavailable to new signups).[@refimages]
+3. **SerpAPI** when `SERPAPI_KEY` is set.[@refimages]
+4. **DuckDuckGo images** via the unofficial `vqd` plus `i.js` flow — the keyless default; works from a dev machine but fails from Vercel with `DDG vqd token not found`.[@refimages]
+5. **Bing Images HTML scrape** via `murl` extraction — keyless last resort; to server fetches it returns an anti-bot page of unrelated tiles, so its output only survives via the vision filter.[@refimages]
 
 Every provider throws or returns `[]`; `fetchReferenceImages()` degrades to ungrounded generation, so a run never breaks over references.[@refimages]
 
