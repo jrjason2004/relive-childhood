@@ -1,8 +1,18 @@
 ---
+title: Vercel Deployment
+summary: Vercel Deployment captures the local Vercel link metadata and the serverless constraints that the current code explicitly encodes for ffmpeg, media delivery, and remote worker access.
 topics:
   - stack
-  - deploy
+  - operations
 sources:
+  - id: vercel-project
+    type: file
+    path: .vercel/project.json
+    note: Records the locally linked Vercel project metadata.
+  - id: vercel-readme
+    type: file
+    path: .vercel/README.txt
+    note: Explains the purpose of the local .vercel directory and project.json file.
   - id: next-config
     type: file
     path: next.config.mjs
@@ -11,20 +21,18 @@ sources:
     type: file
     path: .env.local.example
     note: Migrated from legacy files.
-
+status: active
+verified: 2026-07-07
 ---
 
 # Vercel deployment
 
-Project `relive-childhood`, team `jasons-projects-608a66ae`, production alias `relive-childhood.vercel.app`, behind Vercel Deployment Protection (SSO) by default. Deploy with `vercel --prod --yes`.
+The repo is locally linked to a Vercel project through [[.vercel/project.json]]. That file records `projectName = relive-childhood`, plus a `projectId` and `orgId` for the linked project.[@vercel-project]
 
-Production env vars: `GEMINI_API_KEY`, `GEMINI_RESEARCH_MODEL=gemini-2.5-flash`, `GEMINI_IMAGE_MODEL=gemini-3.1-flash-lite-image`, `SERPAPI_KEY` (dead — out of credits), and the Wan set `COMFY_URL` / `WAN_WIDTH=480` / `WAN_HEIGHT=864` / `WAN_LENGTH=33` / `WAN_GEN_LENGTH=17`. `COMFY_URL` in production points at the [[wan-fleet]] workers' **public IPs** on `:8188` (the SSM tunnels are localhost-only); those IPs are ephemeral, so a worker stop/start requires a Vercel env update. Writing secrets to Vercel required explicit approval from Jason — the permission classifier blocks secret-store writes.
+[[.vercel/README.txt]] says the `.vercel` directory exists because the repo was linked to a Vercel project and that `project.json` holds the linked project and owner IDs.[@vercel-readme]
 
-Serverless constraints that shaped the code:
+The checked-in deployment shape lives in [[./.env.local.example]]. It documents the Gemini variables, the optional image-search credentials, and the Wan worker settings that a remote deployment would need.[@env-local]
 
-- **No shared disk between invocations.** Any route that generates media returns the bytes in the POST response body; the client keeps blobs. The stitch route receives the clips back as multipart uploads (see [[share-film-render]]).
-- **No system ffmpeg** — `ffmpeg-static` provides the binary, and it must be listed in `serverExternalPackages` (`next.config.mjs`) or Next's bundling breaks its path (`spawn /ROOT/... ENOENT`).
-- **DuckDuckGo is blocked from Vercel IPs** — the Bing fallback carries reference grounding in production ([[reference-image-grounding]]).
-- `.env.local` on the Mac holds the live keys and must never be clobbered; `vercel link` once appended `VERCEL_OIDC_TOKEN` to it. `.env.local.example` is the documented shape.
+Three serverless constraints are directly encoded in the codebase. Media-generating routes return bytes in POST responses instead of relying on shared disk between invocations. `ffmpeg-static` provides the video binary and must stay externalized in [[./next.config.mjs]]. Remote deployments cannot use the local SSM tunnel script, so `COMFY_URL` has to point at worker endpoints that the deployment can reach directly.[@next-config][@env-local]
 
-Local dev quirk unrelated to Vercel but hit constantly while verifying: a hidden/occluded browser window throttles timers and suspends media, so timing-sensitive checks need a visible window (pages actively playing audio are exempt from the heaviest throttling).
+Related pages: [[wan-fleet]], [[share-film-render]], [[reference-image-grounding]].

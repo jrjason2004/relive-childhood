@@ -394,6 +394,18 @@ export default function Home() {
   const finalFileExtRef = useRef<"mp4" | "webm">("mp4");
   const shareAutoOpenedRef = useRef(false);
   const videoElsRef = useRef<Record<number, HTMLVideoElement | null>>({}); // slide clips
+  // Live-pass recording: the first playthrough is captured to a hidden
+  // canvas so the shareable file is ready the instant the pass ends.
+  const shownVideoElRef = useRef<HTMLVideoElement | null>(null); // scene on screen, read by the recorder rAF
+  const pendingShareRef = useRef<{
+    run: number;
+    sessionId: string;
+    indices: number[];
+    povImage: string;
+    povText: string;
+  } | null>(null);
+  const musicBufRef = useRef<Promise<ArrayBuffer | null> | null>(null); // prefetched track for the mix
+  const liveRecRef = useRef<{ finish: () => void; abort: () => void } | null>(null);
   const travelT0Ref = useRef(0); // when travel began (loading lines + reveal cap)
   // Travel show: the polaroid memory tunnel, drawn on one canvas.
   const tunnelRef = useRef<HTMLCanvasElement | null>(null);
@@ -855,9 +867,14 @@ export default function Home() {
       // build has no drawtext filter.
       const povImage = renderPovPng(povText);
 
-      // A share-render failure only affects exporting — the live film keeps
-      // playing, so it must never surface as a full-screen error.
-      await renderShareFilm(run, sessionId, ok, povImage, povText);
+      // Arm the live-pass recorder: the first playthrough is captured as it
+      // plays, so the shareable file lands the moment the pass ends. The
+      // track is prefetched now so the recorder starts without a network
+      // wait. renderShareFilm remains the fallback if recording can't run.
+      pendingShareRef.current = { run, sessionId, indices: ok, povImage, povText };
+      musicBufRef.current = fetch(`/api/music?session=${encodeURIComponent(sessionId)}`)
+        .then((r) => (r.ok ? r.arrayBuffer() : null))
+        .catch(() => null);
     } catch (err: any) {
       if (runRef.current === run) setError(err?.message ?? "Something went wrong");
     }
@@ -940,6 +957,9 @@ export default function Home() {
 
   // Scenes hard-cut between each other — no crossfade.
   const shownIdx = playlist.length > 0 ? Math.min(cursor, playlist.length - 1) : -1;
+  // Keep the live-pass recorder pointed at the scene currently on screen.
+  shownVideoElRef.current =
+    !USE_WAN && shownIdx >= 0 ? videoElsRef.current[playlist[shownIdx]?.idx] ?? null : null;
 
   // Wan mode: start the current clip. The next clip is mounted early as a
   // hidden, fully-buffered <video>; when the cursor reaches it, autoPlay has
@@ -979,6 +999,140 @@ export default function Home() {
     shareAutoOpenedRef.current = true;
     setShowShare(true);
   }, [screen, liveDone]);
+
+  // ================= live-pass recorder =================
+
+  // Record the first playthrough as it plays: a hidden 720x1280 canvas
+  // mirrors the scene on screen each frame (plus the POV line), with the
+  // session track mixed in from 0:00. The recorder stops the moment the
+  // pass ends, so the shareable file is ready right as the sheet pops — no
+  // second render, no upload. Falls back to renderShareFilm if anything
+  // about recording is unsupported or produces a dud.
+  useEffect(() => {
+    if (screen !== "film" || !genDone || liveDone) return;
+    const pending = pendingShareRef.current;
+    if (!pending || liveRecRef.current) return;
+    let cancelled = false;
+
+    const fallback = () => {
+      const p = pendingShareRef.current;
+      pendingShareRef.current = null;
+      if (p && runRef.current === p.run) {
+        renderShareFilm(p.run, p.sessionId, p.indices, p.povImage, p.povText);
+      }
+    };
+
+    (async () => {
+      const choice = pickRecorder();
+      const canvas = document.createElement("canvas");
+      canvas.width = 720;
+      canvas.height = 1280;
+      const ctx = canvas.getContext("2d");
+      if (!choice || !ctx || !canvas.captureStream) {
+        fallback();
+        return;
+      }
+      const stream = canvas.captureStream(30);
+
+      // Music from 0:00 (independent of the live element, which has been
+      // playing since travel and may be muted).
+      let audioCtx: AudioContext | null = null;
+      let audioSrc: AudioBufferSourceNode | null = null;
+      try {
+        const buf = await musicBufRef.current;
+        if (buf) {
+          audioCtx = new AudioContext();
+          const audio = await audioCtx.decodeAudioData(buf.slice(0));
+          const dest = audioCtx.createMediaStreamDestination();
+          audioSrc = audioCtx.createBufferSource();
+          audioSrc.buffer = audio;
+          audioSrc.connect(dest);
+          dest.stream.getAudioTracks().forEach((t) => stream.addTrack(t));
+          await audioCtx.resume().catch(() => {});
+        }
+      } catch {
+        audioCtx?.close().catch(() => {});
+        audioCtx = null;
+        audioSrc = null;
+      }
+      if (cancelled || runRef.current !== pending.run) {
+        stream.getTracks().forEach((t) => t.stop());
+        audioCtx?.close().catch(() => {});
+        return;
+      }
+
+      const chunks: Blob[] = [];
+      const recorder = new MediaRecorder(stream, {
+        mimeType: choice.mimeType,
+        videoBitsPerSecond: 4_000_000,
+        audioBitsPerSecond: 128_000,
+      });
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+      const done = new Promise<Blob>((resolve, reject) => {
+        recorder.onerror = () => reject(new Error("Live recording failed"));
+        recorder.onstop = () => resolve(new Blob(chunks, { type: choice.fileType }));
+      });
+
+      let raf = 0;
+      const draw = () => {
+        const v = shownVideoElRef.current;
+        if (v && v.readyState >= 2) drawCover(ctx, v, canvas.width, canvas.height);
+        drawPovText(ctx, pending.povText, canvas.width, canvas.height);
+        raf = requestAnimationFrame(draw);
+      };
+
+      const teardown = () => {
+        cancelAnimationFrame(raf);
+        try {
+          audioSrc?.stop();
+        } catch {}
+        stream.getTracks().forEach((t) => t.stop());
+        audioCtx?.close().catch(() => {});
+        if (recorder.state !== "inactive") recorder.stop();
+      };
+
+      liveRecRef.current = {
+        // Pass ended: finalize the blob and light up the share button.
+        finish: async () => {
+          liveRecRef.current = null;
+          teardown();
+          try {
+            const blob = await done;
+            // A duds guard: a stalled tab produces a near-empty recording.
+            if (runRef.current !== pending.run) return;
+            if (blob.size < 200_000) throw new Error("Recording too small");
+            setFinalShareBlob(blob, choice.ext);
+            pendingShareRef.current = null;
+          } catch {
+            fallback();
+          }
+        },
+        // Restart mid-pass: drop everything silently.
+        abort: () => {
+          liveRecRef.current = null;
+          teardown();
+        },
+      };
+
+      recorder.start(250);
+      try {
+        audioSrc?.start();
+      } catch {}
+      draw();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, genDone, liveDone]);
+
+  // Stop the recorder exactly when the first pass completes.
+  useEffect(() => {
+    if (liveDone) liveRecRef.current?.finish();
+  }, [liveDone]);
 
   // ================= menu actions =================
 
@@ -1071,6 +1225,10 @@ export default function Home() {
     finalBlobRef.current = null;
     finalFileExtRef.current = "mp4";
     shareAutoOpenedRef.current = false;
+    liveRecRef.current?.abort();
+    pendingShareRef.current = null;
+    musicBufRef.current = null;
+    shownVideoElRef.current = null;
     videoElsRef.current = {};
     warpSpeedRef.current = 0;
     curYearRef.current = new Date().getFullYear();

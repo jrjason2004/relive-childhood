@@ -1,0 +1,65 @@
+# .almanac/topics.yaml — source of truth for topic metadata.
+# Managed by `almanac topics` commands. User-added comments
+# between entries will be stripped on the next write (js-yaml
+# doesn't round-trip comments). Edit at your own risk — or use the
+# CLI (`almanac topics create|link|describe|rename|delete`)
+# which preserves the structure correctly.
+topics:
+  - slug: assets
+    title: assets
+    description: Bundled static assets and generated asset libraries.
+    parents:
+      - systems
+  - slug: concepts
+    title: concepts
+    description: Named entities and project vocabulary.
+    parents: []
+  - slug: decisions
+    title: decisions
+    description: Tradeoffs and active-versus-legacy behavior that shape current work.
+    parents: []
+  - slug: design
+    title: design
+    description: Prototype and handoff material that shape the shipped UI.
+    parents:
+      - frontend
+  - slug: flows
+    title: flows
+    description: End-to-end behaviors that cross files or systems.
+    parents: []
+  - slug: frontend
+    title: frontend
+    description: Client-side screens, timing, and visual behaviors.
+    parents:
+      - systems
+  - slug: generation
+    title: generation
+    description: AI research, still generation, and motion generation.
+    parents:
+      - systems
+  - slug: incidents
+    title: incidents
+    description: Failures, degradations, and operational surprises worth preserving.
+    parents: []
+  - slug: media
+    title: media
+    description: Audio, image, video, stitching, and temp-file handling.
+    parents:
+      - systems
+  - slug: operations
+    title: operations
+    description: Local scripts and infrastructure handling for external workers.
+    parents:
+      - systems
+  - slug: product
+    title: product
+    description: User-facing product shape and experience.
+    parents: []
+  - slug: stack
+    title: stack
+    description: External models, services, and runtime dependencies.
+    parents: []
+  - slug: systems
+    title: systems
+    description: Custom runtime systems built in this repo.
+    parents: []
