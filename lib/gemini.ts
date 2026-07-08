@@ -192,6 +192,12 @@ True first-person POV from the eyes of a YOUNG CHILD around 7 years old: a LOW, 
   for (const r of refs) {
     parts.push({ inlineData: { mimeType: r.mimeType, data: r.data } });
   }
+  console.info("[gemini:image] request", {
+    model,
+    refCount: refs.length,
+    inlineImageParts: parts.filter((p) => p.inlineData).length,
+    mimeTypes: refs.map((r) => r.mimeType),
+  });
 
   const body = {
     contents: [{ role: "user", parts }],
