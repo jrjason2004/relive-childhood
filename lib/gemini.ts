@@ -102,8 +102,9 @@ NON-NEGOTIABLE — every single one of the 7 must be UNMISTAKABLY ANCHORED TO ${
 - real named neighborhoods, streets, regional chains, local geography/skyline, the local minor-league or pro team, the local water park or county fair
 - a moment that fuses a verified local place WITH an era fad or childhood ritual (e.g. trading Pokémon cards outside a specific named local diner, counting arcade tickets at a verified local arcade, eating a local ballpark snack while wearing the home team's cap)
 
-NOSTALGIC ACTION REQUIREMENT — every moment must show the child DOING something era-specific inside or immediately around the local anchor:
-- Good: gripping arcade tokens at a named local arcade while friends crowd around a cabinet; carrying a melting regional ice cream cone at a named park; choosing a VHS/game rental at a verified local video store; clutching pool wristbands and concession-stand fries at a named public pool; trading cards on the curb outside a named local restaurant; holding a souvenir cup at a local minor-league game.
+NOSTALGIC ACTION REQUIREMENT — every moment must PAIR TWO NOSTALGIA HITS: an ICONIC era-defining object/activity + the real local place. The object should make someone who grew up then gasp "oh my god, I had that" — a generation-defining toy, game, gadget, or ritual, not generic snack-holding:
+- Good: pointing a white Wii Remote at the screen in a wood-paneled basement; kicking a Razor scooter along a named neighborhood sidewalk; looping rubber bands on a Rainbow Loom at a named park; feeding a Tamagotchi outside a named pool; playing a purple Game Boy Color in a named diner booth; choosing a VHS rental at the verified local video store; trading holographic Pokémon cards on the curb outside a named restaurant.
+- Weak (avoid as the main hook): merely holding food, a cup, a wristband, or tickets — food/snacks may only appear as a side detail, never as the scene's era anchor.
 - Bad: standing in front of a sign, looking at a skyline, walking past a storefront, generic kids playing with no local marker, a landmark postcard shot with no childhood activity.
 - The activity must be visible in the composition through hands, props, friends, adults, signage, counters, tickets, trays, wristbands, bikes, toys, games, snacks, or uniforms that match ${childhoodSpan}.
 
@@ -116,12 +117,13 @@ CRITICAL — era accuracy for real places. This person will instantly notice an 
 For each of the 7, return:
 - "title": short punchy name
 - "description": 1-2 sentences on the specific childhood activity and why doing it at this local place was nostalgic for this place + era
-- "imagePrompt": a SHORT clause (about 5-12 words) naming ONLY what the child is holding or doing with the era-specific object — nothing else. It gets dropped into "A first-person POV photo from a 7-year-old child's low perspective, <imagePrompt>. In the attached scene." so start with a verb like holding/gripping/clutching/carrying/trading/eating.
-  Be SPECIFIC about any physical item the child holds — the exact era-defining variety, edition, title, or model — because the item is what pins the year. Spend about 5-7 words naming it precisely, but no more (don't over-describe). If it's Pokémon cards, say which set/era (e.g. "holographic 1999 Base Set Pokémon cards", NOT just "Pokémon cards"). If it's a movie/game/book, name a real title from ${childhoodSpan} (e.g. "a Blockbuster VHS of The Lion King", "a Goosebumps 'Night of the Living Dummy' paperback", "a boxed Nintendo 64 GoldenEye cartridge"), NOT just "a movie" / "a book" / "a game". If it's food/a toy, name the specific era brand/kind ("a Surge soda can", "a Tamagotchi on a keychain").
+- "imagePrompt": a SHORT clause (about 5-12 words) naming ONLY what the child is doing with the iconic era-defining object — nothing else. It gets dropped into "A first-person POV photo, <skin tone> skinned child, <imagePrompt>. In the attached scene." so start with a verb phrase like two hands holding/gripping/pointing/kicking/trading/playing.
+  The object must be the scene's era anchor — the generation-defining toy, game, gadget, or ritual (see the nostalgic action requirement) — named with its exact era-defining variety, edition, title, or model, because the item is what pins the year. Spend about 5-7 words naming it precisely, but no more (don't over-describe). If it's Pokémon cards, say which set/era (e.g. "holographic 1999 Base Set Pokémon cards", NOT just "Pokémon cards"). If it's a movie/game/console, name the real era model/title from ${childhoodSpan} (e.g. "a white Wii Remote", "a Blockbuster VHS of The Lion King", "a boxed Nintendo 64 GoldenEye cartridge"), NOT just "a movie" / "a game".
   NEVER name or append the location — no "at <place>", no venue/pool/store/theater/park name — the attached reference photo already shows where it is. Also no camera, lighting, people, or era words.
+  RIGHT: "two hands pointing a white Wii Remote at the TV"
+  RIGHT: "kicking a silver Razor scooter down the sidewalk"
   RIGHT: "clutching holographic 1999 Base Set Pokémon cards"
-  RIGHT: "holding a Blockbuster VHS of The Lion King"
-  WRONG: "holding some Pokémon cards" (too vague — no era) or "...at Brambleton Community Center Pool" (names the place)
+  WRONG: "holding a handful of concession stand fries" (food is not an era anchor), "holding some Pokémon cards" (too vague — no era), "...at Brambleton Community Center Pool" (names the place)
 - "videoPrompt": how this still comes alive as a 4-second clip — subtle, realistic motion from the low child's-eye view while the kid continues the nostalgic activity: hands move, friends shift, an arcade screen flickers, a snack drips, tickets flutter, a ball rolls, a bike coasts, or the child gently walks forward. Keep the verified local anchor visible. No scene cuts.
 - "referenceQuery": the best Google Images search query to retrieve REAL PHOTOGRAPHS (not maps, logos, or graphics) of the specific landmark/object/place named. Be specific and include the city. If the place still exists but has been rebuilt or renovated since ${childhoodSpan}, bias the query toward how it looked then (e.g. add the decade, "vintage", "old", or "historic") so the results are period-accurate rather than the modern version.
 - "kind": "place" for every object. All 7 moments must center on a NAMED real local location, event venue, park, store, arcade, restaurant, mall, pool, street, neighborhood, team venue, or landmark whose real archival photos would be findable on Google Images.
@@ -248,10 +250,10 @@ export async function generateImage(
 ): Promise<{ mimeType: string; data: string }> {
   const model = process.env.GEMINI_IMAGE_MODEL || "gemini-3-pro-image";
 
-  const child = `a 7-year-old ${skinTone}-skinned child's low perspective`;
+  const child = `${skinTone} skinned child`;
   const fullPrompt = ref
-    ? `A first-person POV photo from ${child}, ${activity}. In the attached scene.`
-    : `A first-person POV photo from ${child}, ${activity}${fallbackScene ? `, at ${fallbackScene}` : ""}.`;
+    ? `A first-person POV photo, ${child}, ${activity}. In the attached scene.`
+    : `A first-person POV photo, ${child}, ${activity}${fallbackScene ? `, at ${fallbackScene}` : ""}.`;
 
   const parts: any[] = [{ text: fullPrompt }];
   if (ref) parts.push({ inlineData: { mimeType: ref.mimeType, data: ref.data } });
