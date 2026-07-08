@@ -18,12 +18,17 @@ const UA =
 export async function fetchReferenceImages(query: string, count = 3): Promise<RefImage[]> {
   const providers: Array<{ name: string; urls: () => Promise<string[]> }> = [
     { name: "duckduckgo", urls: () => duckDuckGoUrls(query) },
-    { name: "bing", urls: () => bingImageUrls(query) },
   ];
   if (process.env.GOOGLE_CSE_KEY && process.env.GOOGLE_CSE_CX) {
     providers.push({ name: "google_cse", urls: () => googleCseUrls(query, count) });
   }
   if (process.env.SERPAPI_KEY) providers.push({ name: "serpapi", urls: () => serpApiUrls(query) });
+  // Scraped Bing is the LAST resort: to server-side fetches it serves a
+  // degraded anti-bot page whose tiles are unrelated to the query (verified:
+  // a Blockbuster query returned beauty-site images; an Ashburn query
+  // returned Slovakia). Anything it yields must pass the vision relevance
+  // filter before grounding a scene.
+  providers.push({ name: "bing", urls: () => bingImageUrls(query) });
 
   for (const provider of providers) {
     let candidates: string[] = [];
