@@ -118,7 +118,7 @@ For each of the 7, return:
 - "description": 1-2 sentences on the specific childhood activity and why doing it at this local place was nostalgic for this place + era
 - "imagePrompt": a SIMPLE, true first-person POV photo from the eyes of a YOUNG CHILD, around 7 years old, actively doing the nostalgic activity at the verified ${city} anchor. The vantage point is LOW — at a small child's height — looking out and slightly up at the moment: the child's small hands (${skinTone} skin tone) should naturally hold or reach for the era-specific prop, snack, ticket, toy, game, bike handlebar, tray, wristband, or other activity object. Other young children the same age, taller grown-ups, and the real place must surround the action. The location anchor must be VISIBLE in the frame (the actual signage, storefront, landmark, scoreboard, counter, entrance, ride, court, pool, or unmistakable local setting — name it in the prompt). The viewer is a little kid participating in a memory, not staring at a building or isolated object. Do not show the viewer's face. State explicitly that the scene is set in ${childhoodSpan} so every detail (signage, cars, clothes, devices, toys, games, food packaging) matches those years. Warm nostalgic film look, era-accurate details, 9:16 vertical.
 - "videoPrompt": how this still comes alive as a 4-second clip — subtle, realistic motion from the low child's-eye view while the kid continues the nostalgic activity: hands move, friends shift, an arcade screen flickers, a snack drips, tickets flutter, a ball rolls, a bike coasts, or the child gently walks forward. Keep the verified local anchor visible. No scene cuts.
-- "referenceQuery": the best Google Images search query to retrieve REAL photos of the specific landmark/object/place named (be specific, include city + era if helpful).
+- "referenceQuery": the best Google Images search query to retrieve REAL PHOTOGRAPHS (not maps, logos, or graphics) of the specific landmark/object/place named. Be specific and include the city. If the place still exists but has been rebuilt or renovated since ${childhoodSpan}, bias the query toward how it looked then (e.g. add the decade, "vintage", "old", or "historic") so the results are period-accurate rather than the modern version.
 - "kind": "place" for every object. All 7 moments must center on a NAMED real local location, event venue, park, store, arcade, restaurant, mall, pool, street, neighborhood, team venue, or landmark whose real archival photos would be findable on Google Images.
 
 Return ONLY valid JSON, an array of exactly 7 objects with those keys. No markdown, no commentary.`;
@@ -195,7 +195,9 @@ export async function filterRelevantRefs(query: string, refs: RefImage[]): Promi
   });
   parts.push({
     text: `These images came from an image search for: "${query}".
-Which of them are REAL PHOTOGRAPHS that plausibly depict that subject (the actual place, object, or scene — any era, archival is fine)? Reject cartoons, clipart, illustrations, logos, maps, charts, diagrams, website screenshots, watermarked stock previews, and photos of unrelated places or things.
+Keep ONLY images that are REAL CAMERA PHOTOGRAPHS of that actual subject (the real place, object, or scene — archival or modern, both fine).
+REJECT anything that is not a real photograph, including: illustrations, drawings, cartoons, clipart, 3D renderings, architectural mockups or CGI, floor plans, blueprints, maps, diagrams, charts, infographics, logos, icons, emoji, posters, movie/album art, product boxes or packaging, text-heavy graphics, and website or app screenshots. Also reject real photographs of a DIFFERENT place or thing than the subject, and heavily watermarked stock previews.
+When you are not clearly confident an image is a real photograph OF THIS SUBJECT, REJECT it.
 Return ONLY a JSON array of the qualifying image numbers, e.g. [1,3]. If none qualify, return [].`,
   });
   try {
@@ -242,7 +244,11 @@ export async function generateImage(
 
   const fullPrompt = `${imagePrompt}
 
-True first-person POV from the eyes of a YOUNG CHILD around 7 years old: a LOW, small-child vantage looking out and slightly up at the scene, other young kids the same age, and grown-ups who tower above. The child must be actively doing the nostalgic activity named in the prompt at the real local place: small hands should naturally hold, reach for, carry, trade, play with, eat, steer, or touch the era-specific prop, snack, ticket, toy, game, bike, tray, wristband, or object that makes the memory feel lived-in. Do not make a static landmark or storefront shot. Keep the verified local anchor visible in the surroundings while the childhood action remains clear. Do not show the viewer's face. Use the reference photos only to depict the real place accurately. Warm nostalgic photographic 9:16 vertical. No text or watermarks.`;
+True first-person POV from the eyes of a YOUNG CHILD around 7 years old: a LOW, small-child vantage looking out and slightly up at the scene, other young kids the same age, and grown-ups who tower above. The child must be actively doing the nostalgic activity named in the prompt at the real local place: small hands should naturally hold, reach for, carry, trade, play with, eat, steer, or touch the era-specific prop, snack, ticket, toy, game, bike, tray, wristband, or object that makes the memory feel lived-in. Do not make a static landmark or storefront shot. Keep the verified local anchor visible in the surroundings while the childhood action remains clear. Do not show the viewer's face.
+
+REFERENCE PHOTOS — IDENTITY, NOT ERA. Use the attached reference photos ONLY to recognize the real place's identity, architecture, layout, and brand look. They were most likely shot in the present day, so DO NOT copy modern details from them: ignore any present-day or renovated signage, current logos/branding, LED or digital screens, flat-panel TVs, modern cars, smartphones, and recent remodels. Render the place authentically as it looked in the exact year/era stated above — period-correct signage, storefront and interior design, materials, lighting, vehicles, clothing, and technology of that time. Era accuracy overrides the references wherever they conflict.
+
+Warm nostalgic photographic 9:16 vertical. No text or watermarks.`;
 
   const parts: any[] = [{ text: fullPrompt }];
   for (const r of refs) {
