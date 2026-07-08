@@ -8,3 +8,9 @@ out
 next-env.d.ts
 .vercel
 .env*
+
+# codealmanac
+.almanac/index.db
+.almanac/index.db-wal
+.almanac/index.db-shm
+.almanac/jobs/
