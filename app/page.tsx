@@ -41,6 +41,11 @@ type SlideSpec = {
 const CONCURRENCY = 7;
 const CHILD_AGE = 7; // matches the POV age in the image/video prompts
 const USE_WAN = process.env.NEXT_PUBLIC_USE_WAN === "1"; // motion clips instead of stills
+// Fixed pool of always-mounted clip decoders. iOS (especially Low Power Mode)
+// only lets a <video> play programmatically after a user gesture has touched
+// that specific element — so the elements must exist before the tap that
+// starts the journey, and get unlocked inside it. Must cover the scene count.
+const SCENE_POOL = 8;
 const SLIDE_MS = 2000; // 7 slides × 2s = a 14s pass
 const TRAVEL_LOAD_MS = 80000;
 const SANS = "var(--font-sans), sans-serif";
@@ -409,6 +414,7 @@ export default function Home() {
 
   const mirrorRef = useRef<HTMLVideoElement>(null);
   const mirrorCanvasRef = useRef<HTMLCanvasElement>(null);
+  const filmCanvasRef = useRef<HTMLCanvasElement>(null);
   const filmRef = useRef<HTMLVideoElement>(null);
   const clipRefs = useRef<Array<HTMLVideoElement | null>>([]);
   const musicRef = useRef<HTMLAudioElement>(null);
@@ -760,6 +766,19 @@ export default function Home() {
       m.play().catch(() => {});
     }
 
+    // Unlock the clip decoder pool while we're inside a real tap: load()
+    // during a user gesture permanently lifts iOS's playback restriction for
+    // each element, so the film can start clips programmatically later even
+    // in Low Power Mode. (No srcs are set yet — load() is a harmless reset.)
+    Object.values(videoElsRef.current).forEach((v) => {
+      try {
+        v?.load();
+        v?.play().catch(() => {});
+      } catch {
+        /* unlock is best-effort */
+      }
+    });
+
     clearTimers();
     // The camera stays on: the travel screen paints its magic over the live
     // mirror. It's stopped when the film reveals.
@@ -1021,6 +1040,49 @@ export default function Home() {
   // Scenes hard-cut between each other — no crossfade.
   const shownIdx = playlist.length > 0 ? Math.min(cursor, playlist.length - 1) : -1;
 
+  // Film painter: copy the shown clip's frames onto the visible canvas every
+  // frame. The canvas keeps the last frame during scene swaps (no black
+  // flash) and, while the film is live, keeps nudging a clip that iOS
+  // refused to start (throttled retry + any touch is a fresh user gesture).
+  useEffect(() => {
+    if (USE_WAN || screen !== "film" || shownIdx < 0) return;
+    const sceneIdx = playlist[shownIdx]?.idx;
+    if (sceneIdx === undefined) return;
+    let raf = 0;
+    let lastKick = 0;
+    const tick = (now: number) => {
+      const v = videoElsRef.current[sceneIdx];
+      const c = filmCanvasRef.current;
+      if (v && c) {
+        if (!liveDone && v.paused && !v.ended && now - lastKick > 700) {
+          lastKick = now;
+          v.play().catch(() => {});
+        }
+        if (v.videoWidth > 0 && v.readyState >= 2) {
+          if (c.width !== v.videoWidth || c.height !== v.videoHeight) {
+            c.width = v.videoWidth;
+            c.height = v.videoHeight;
+          }
+          c.getContext("2d")?.drawImage(v, 0, 0, c.width, c.height);
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    const kick = () => {
+      if (liveDone) return;
+      const v = videoElsRef.current[sceneIdx];
+      if (v && v.paused && !v.ended) v.play().catch(() => {});
+    };
+    window.addEventListener("pointerdown", kick);
+    window.addEventListener("touchend", kick);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("pointerdown", kick);
+      window.removeEventListener("touchend", kick);
+    };
+  }, [screen, shownIdx, playlist, liveDone]);
+
   // Wan mode: start the current clip. The next clip is mounted early as a
   // hidden, fully-buffered <video>; when the cursor reaches it, autoPlay has
   // already fired on mount, so we kick playback here instead.
@@ -1151,7 +1213,19 @@ export default function Home() {
     finalBlobRef.current = null;
     finalFileExtRef.current = "mp4";
     shareAutoOpenedRef.current = false;
-    videoElsRef.current = {};
+    // The decoder pool stays mounted across runs — reset each element rather
+    // than dropping the refs (React only reruns ref callbacks on remount).
+    // restart() runs inside a tap, so load() also re-unlocks them for iOS.
+    Object.values(videoElsRef.current).forEach((v) => {
+      if (!v) return;
+      v.pause();
+      v.removeAttribute("src");
+      try {
+        v.load();
+      } catch {
+        /* best-effort reset */
+      }
+    });
     warpSpeedRef.current = 0;
     curYearRef.current = new Date().getFullYear();
     clipRefs.current = [];
@@ -1387,6 +1461,35 @@ export default function Home() {
       >
         <audio ref={musicRef} loop preload="auto" />
         <input ref={fileRef} type="file" accept="image/*" onChange={onPickFile} hidden />
+
+        {/* Clip decoder pool — always mounted, never visible (the film canvas
+            paints their frames). Being mounted before toTravel's tap lets
+            that gesture unlock each element for programmatic playback, which
+            iOS Low Power Mode otherwise blocks (clips froze on Safari's play
+            overlay and the driver skipped past them as black screens). */}
+        {!USE_WAN &&
+          Array.from({ length: SCENE_POOL }, (_, i) => {
+            const entry = playlist.find((p) => p.idx === i);
+            return (
+              <video
+                key={i}
+                ref={(el) => {
+                  videoElsRef.current[i] = el;
+                }}
+                src={entry?.video}
+                muted
+                playsInline
+                preload="auto"
+                style={{
+                  position: "absolute",
+                  width: 2,
+                  height: 2,
+                  opacity: 0.001,
+                  pointerEvents: "none",
+                }}
+              />
+            );
+          })}
 
         {/* ============ persistent live mirror (scan + city) ============ */}
         {showMirror && (
@@ -1959,29 +2062,11 @@ export default function Home() {
         {screen === "film" && (
           <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#000" }}>
             {!USE_WAN ? (
-              // Every scene's clip is fully generated before the reveal, so
-              // this plays start-to-finish like one continuous video: each
-              // clip runs once for its 2s scene, hard cut to the next.
-              playlist.map((p, i) => {
-                const isShown = i === shownIdx;
-                return (
-                  <video
-                    key={p.video}
-                    ref={(el) => {
-                      videoElsRef.current[p.idx] = el;
-                    }}
-                    src={p.video}
-                    muted
-                    playsInline
-                    autoPlay={isShown}
-                    style={{
-                      ...FULL_BLEED,
-                      zIndex: isShown ? 2 : 0,
-                      opacity: isShown ? 1 : 0,
-                    }}
-                  />
-                );
-              })
+              // Every scene's clip is fully generated before the reveal and
+              // decoded by the hidden pool; this canvas paints the shown
+              // clip's frames — hard cuts, no black gaps between scenes, and
+              // no surface for WebKit's Low Power Mode play/pause overlay.
+              <canvas ref={filmCanvasRef} style={{ ...FULL_BLEED, zIndex: 2 }} />
             ) : (
               <>
                 {/* Wan mode: live clip stack, double-buffered from blob URLs. */}
