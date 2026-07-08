@@ -272,14 +272,26 @@ async function renderFilmInBrowser(
 
 const POV_PREFIX = "POV: Growing up in";
 
+// City name, before any comma, with each word capitalized — fixes lowercase
+// or ALL-CAPS input ("brambleton" → "Brambleton", "NEW YORK" → "New York")
+// while leaving intentional mixed case alone ("McLean" stays "McLean").
 function cityOnly(value: string): string {
-  const raw = value.split(",")[0].trim();
-  return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : "";
+  return value
+    .split(",")[0]
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => {
+      const uniform = w === w.toLowerCase() || w === w.toUpperCase();
+      return w.charAt(0).toUpperCase() + (uniform ? w.slice(1).toLowerCase() : w.slice(1));
+    })
+    .join(" ");
 }
 
-function povTextForCity(value: string): string {
-  const cleaned = cityOnly(value);
-  return cleaned ? `${POV_PREFIX}\n${cleaned}` : "";
+// Two-line TikTok caption: "POV: Growing up in" / "{year} {City}".
+function povTextForCity(value: string, year: number): string {
+  const city = cityOnly(value);
+  return city ? `${POV_PREFIX}\n${year} ${city}` : "";
 }
 
 function drawPovText(
@@ -293,18 +305,29 @@ function drawPovText(
   if (lines.length === 0) return;
   const fontSize = w * 0.06;
   const lineHeight = fontSize * 1.08;
+  const maxW = w - fontSize * 0.75;
   ctx.save();
   ctx.font = `800 ${fontSize}px -apple-system, 'Helvetica Neue', Arial, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.lineJoin = "round";
-  ctx.lineWidth = fontSize * 0.22;
-  ctx.strokeStyle = "rgba(0,0,0,0.9)";
+  ctx.miterLimit = 2;
+  // A soft drop shadow for depth, then a clean, evenly-rounded outline
+  // (stroke drawn under the fill) — no chunky corners.
+  ctx.shadowColor = "rgba(0,0,0,0.5)";
+  ctx.shadowBlur = fontSize * 0.28;
+  ctx.shadowOffsetY = fontSize * 0.06;
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = fontSize * 0.15;
+  lines.forEach((line, i) => {
+    const y = top + lineHeight / 2 + i * lineHeight;
+    ctx.strokeText(line, w / 2, y, maxW);
+  });
+  ctx.shadowColor = "transparent";
   ctx.fillStyle = "#fff";
   lines.forEach((line, i) => {
     const y = top + lineHeight / 2 + i * lineHeight;
-    ctx.strokeText(line, w / 2, y, w - fontSize * 0.75);
-    ctx.fillText(line, w / 2, y, w - fontSize * 0.75);
+    ctx.fillText(line, w / 2, y, maxW);
   });
   ctx.restore();
 }
@@ -868,7 +891,7 @@ export default function Home() {
 
       // Every index in `ok` has a rendered Wan clip (buildSlide resolves only
       // after the clip lands), so the stitched mp4 is video-only too.
-      const povText = povTextForCity(cityName);
+      const povText = povTextForCity(cityName, childYear);
       // Render the POV line to a transparent PNG for the stitch overlay —
       // canvas text matches the live overlay exactly, and the local ffmpeg
       // build has no drawtext filter.
@@ -1292,7 +1315,7 @@ export default function Home() {
   // or country after a comma is deliberately dropped.
   const povYear = fromYear - yearsBack;
   povYearRef.current = povYear; // tunnel polaroids never go past this year
-  const povLine = povTextForCity(cityTrim);
+  const povLine = povTextForCity(cityTrim, povYear);
 
   // The time tunnel: light streaks racing outward past the camera, speed
   // starts high and eases down with the rewind. Pure lines on one canvas — the
@@ -2074,11 +2097,14 @@ export default function Home() {
                   fontFamily: SANS,
                   fontWeight: 800,
                   fontSize: 27,
-                  lineHeight: 1.08,
+                  lineHeight: 1.12,
                   letterSpacing: 0,
                   color: "#fff",
-                  textShadow:
-                    "-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, 0 3px 0 #000, 0 6px 22px rgba(0,0,0,0.55)",
+                  // Clean, even outline via text-stroke painted under the
+                  // fill, plus a soft shadow for depth — no jagged corners.
+                  WebkitTextStroke: "1.4px #000",
+                  paintOrder: "stroke fill",
+                  textShadow: "0 2px 12px rgba(0,0,0,0.5)",
                   animation: "rcRise 0.9s ease both",
                 }}
               >
