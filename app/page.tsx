@@ -1791,6 +1791,34 @@ export default function Home() {
             >
               Take me back&nbsp;&nbsp;→
             </button>
+            <div
+              style={{
+                marginTop: 14,
+                textAlign: "center",
+                fontSize: 11,
+                lineHeight: 1.5,
+                color: "rgba(255,255,255,0.42)",
+              }}
+            >
+              By continuing you agree to our{" "}
+              <a
+                href="https://jasonstacks.com/terms"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: "rgba(255,255,255,0.62)", textDecoration: "underline" }}
+              >
+                terms
+              </a>{" "}
+              and{" "}
+              <a
+                href="https://jasonstacks.com/privacy"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: "rgba(255,255,255,0.62)", textDecoration: "underline" }}
+              >
+                privacy policy
+              </a>
+            </div>
           </div>
         )}
 
@@ -2248,6 +2276,31 @@ export default function Home() {
             {error} — tap to start over
           </button>
         )}
+
+        {/* persistent footer credit, on every screen */}
+        <a
+          href="https://jasonstacks.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            position: "absolute",
+            left: "50%",
+            bottom: 8,
+            transform: "translateX(-50%)",
+            zIndex: 40,
+            fontFamily: SANS,
+            fontSize: 10,
+            fontWeight: 500,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            color: "rgba(255,255,255,0.34)",
+            textDecoration: "none",
+            textShadow: "0 1px 6px rgba(0,0,0,0.6)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          a Stacks experience
+        </a>
       </div>
     </div>
   );
