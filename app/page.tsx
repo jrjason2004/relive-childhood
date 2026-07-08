@@ -477,6 +477,29 @@ export default function Home() {
     setCamReady(false);
   }
 
+  // iOS Low Power Mode rejects the async play() after getUserMedia and can
+  // suspend a running stream when the screen dims. While the scan screen is
+  // up, keep nudging the mirror back to life: retry on an interval, on any
+  // touch (a user gesture always satisfies the autoplay policy), and when the
+  // tab regains focus.
+  useEffect(() => {
+    if (screen !== "scan") return;
+    const kick = () => {
+      const v = mirrorRef.current;
+      if (v && streamRef.current && v.paused) v.play().catch(() => {});
+    };
+    const id = setInterval(kick, 800);
+    window.addEventListener("pointerdown", kick);
+    window.addEventListener("touchend", kick);
+    document.addEventListener("visibilitychange", kick);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("pointerdown", kick);
+      window.removeEventListener("touchend", kick);
+      document.removeEventListener("visibilitychange", kick);
+    };
+  }, [screen]);
+
   function clearTimers() {
     if (scanTimer.current) clearInterval(scanTimer.current);
     if (travelTimer.current) clearInterval(travelTimer.current);
@@ -1367,9 +1390,17 @@ export default function Home() {
                 muted
                 playsInline
                 onPlaying={() => setCamReady(true)}
+                // iOS Low Power Mode suspends the stream mid-scan and paints
+                // its play/pause overlay on the (mirrored) frozen frame — hide
+                // the element whenever it isn't actively playing, and never
+                // let taps reach the native control.
+                onPause={() => setCamReady(false)}
+                onSuspend={() => setCamReady(false)}
+                onWaiting={() => setCamReady(false)}
                 style={{
                   ...FULL_BLEED,
                   transform: "scaleX(-1)",
+                  pointerEvents: "none",
                   // Invisible until the camera is actually playing — an empty
                   // <video> otherwise shows the browser's native play button.
                   opacity: camReady ? 0.94 : 0,
