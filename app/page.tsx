@@ -377,6 +377,7 @@ export default function Home() {
   // ---- flow
   const [screen, setScreen] = useState<"scan" | "city" | "travel" | "film">("scan");
   const [camDenied, setCamDenied] = useState(false);
+  const [camReady, setCamReady] = useState(false); // true once the mirror is actually playing
   const [scanP, setScanP] = useState(0);
   const [locked, setLocked] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -473,6 +474,7 @@ export default function Home() {
   function stopCam() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    setCamReady(false);
   }
 
   function clearTimers() {
@@ -1114,6 +1116,7 @@ export default function Home() {
     sessionRef.current = "";
     setScreen("scan");
     setCamDenied(false);
+    setCamReady(false);
     setScanP(0);
     setLocked(false);
     setProfile(null);
@@ -1363,7 +1366,14 @@ export default function Home() {
                 autoPlay
                 muted
                 playsInline
-                style={{ ...FULL_BLEED, transform: "scaleX(-1)", opacity: 0.94 }}
+                onPlaying={() => setCamReady(true)}
+                style={{
+                  ...FULL_BLEED,
+                  transform: "scaleX(-1)",
+                  // Invisible until the camera is actually playing — an empty
+                  // <video> otherwise shows the browser's native play button.
+                  opacity: camReady ? 0.94 : 0,
+                }}
               />
             </div>
             <div
