@@ -19,6 +19,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
+import { track } from "@/lib/track";
+
+// Once per page load, not per render/strict-mode double-effect.
+let viewTracked = false;
 
 type Moment = {
   title: string;
@@ -447,6 +451,14 @@ export default function Home() {
   const fromYear = new Date().getFullYear();
   const startAge = profile?.ageYears ?? 30;
   const yearsBack = Math.max(1, startAge - CHILD_AGE);
+
+  // Portfolio tracking: one view per page load (module flag guards against
+  // strict-mode's double-invoked effects).
+  useEffect(() => {
+    if (viewTracked) return;
+    viewTracked = true;
+    track("increment_project_views");
+  }, []);
 
   // ================= camera + scan =================
 
@@ -971,6 +983,9 @@ export default function Home() {
         .filter((x): x is number => x !== null)
         .sort((a, b) => a - b);
       if (ok.length === 0) throw new Error("The film couldn't be developed");
+
+      // Portfolio tracking: count one successful generation (not attempts).
+      track("increment_project_generations");
 
       // Every index in `ok` has a rendered Wan clip (buildSlide resolves only
       // after the clip lands), so the stitched mp4 is video-only too.
