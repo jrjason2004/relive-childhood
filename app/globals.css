@@ -4,6 +4,21 @@
   padding: 0;
 }
 
+/* Never show the browser's native media UI on our <video> elements — Safari
+   in particular renders a big center play button on a video that hasn't
+   started (the stray "play/pause button" on scan + film). */
+video::-webkit-media-controls,
+video::-webkit-media-controls-enclosure,
+video::-webkit-media-controls-panel,
+video::-webkit-media-controls-overlay-play-button,
+video::-webkit-media-controls-play-button,
+video::-webkit-media-controls-start-playback-button {
+  display: none !important;
+  -webkit-appearance: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 html,
 body {
   background: #050409;
