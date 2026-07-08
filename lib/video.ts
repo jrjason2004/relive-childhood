@@ -300,7 +300,16 @@ async function fileExists(p: string): Promise<boolean> {
 const FFMPEG_BIN: string = (() => {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return (require("ffmpeg-static") as string) || "ffmpeg";
+    const bin = (require("ffmpeg-static") as string) || "ffmpeg";
+    // On Vercel the traced binary can arrive without its executable bit, so
+    // spawn fails with EACCES and every stitch silently falls back. Restore
+    // +x best-effort; harmless when it's already executable or on PATH.
+    try {
+      if (bin !== "ffmpeg") require("fs").chmodSync(bin, 0o755);
+    } catch {
+      /* not fatal — spawn will surface a real error if it truly can't run */
+    }
+    return bin;
   } catch {
     return "ffmpeg";
   }

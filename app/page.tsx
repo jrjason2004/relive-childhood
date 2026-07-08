@@ -60,7 +60,6 @@ const SERIF = "var(--font-serif), serif";
 // public/polaroids/) fly past as polaroids, matched to the year the rewind
 // is passing through. Drawn entirely on one canvas — no per-frame React.
 type PolaroidEntry = { y: number; l: string; f: string };
-type RecorderChoice = { mimeType: string; ext: "mp4" | "webm"; fileType: string };
 
 function smootherStep(t: number): number {
   return t * t * t * (t * (t * 6 - 15) + 10);
@@ -117,167 +116,6 @@ function flashFractions(count: number): number[] {
   if (count === 1) return [0.35];
   if (count === 2) return [0.22, 0.68];
   return Array.from({ length: count }, (_, i) => 0.18 + (0.68 * i) / Math.max(1, count - 1));
-}
-
-function pickRecorder(): RecorderChoice | null {
-  if (typeof MediaRecorder === "undefined") return null;
-  const choices: RecorderChoice[] = [
-    { mimeType: "video/mp4;codecs=avc1.42E01E,mp4a.40.2", ext: "mp4", fileType: "video/mp4" },
-    { mimeType: "video/mp4", ext: "mp4", fileType: "video/mp4" },
-    { mimeType: "video/webm;codecs=vp9,opus", ext: "webm", fileType: "video/webm" },
-    { mimeType: "video/webm;codecs=vp8,opus", ext: "webm", fileType: "video/webm" },
-    { mimeType: "video/webm", ext: "webm", fileType: "video/webm" },
-  ];
-  return choices.find((c) => MediaRecorder.isTypeSupported(c.mimeType)) ?? null;
-}
-
-function drawCover(ctx: CanvasRenderingContext2D, video: HTMLVideoElement, w: number, h: number) {
-  const vw = video.videoWidth || w;
-  const vh = video.videoHeight || h;
-  const scale = Math.max(w / vw, h / vh);
-  const dw = vw * scale;
-  const dh = vh * scale;
-  ctx.drawImage(video, (w - dw) / 2, (h - dh) / 2, dw, dh);
-}
-
-async function loadVideoForRender(blob: Blob, urls: string[]): Promise<HTMLVideoElement> {
-  const url = URL.createObjectURL(blob);
-  urls.push(url);
-  const v = document.createElement("video");
-  v.src = url;
-  v.muted = true;
-  v.playsInline = true;
-  v.preload = "auto";
-  await new Promise<void>((resolve, reject) => {
-    const done = () => resolve();
-    v.addEventListener("loadedmetadata", done, { once: true });
-    v.addEventListener("error", () => reject(new Error("Clip could not be loaded")), { once: true });
-  });
-  return v;
-}
-
-async function seekStart(v: HTMLVideoElement) {
-  await new Promise<void>((resolve) => {
-    let settled = false;
-    const done = () => {
-      if (settled) return;
-      settled = true;
-      v.removeEventListener("seeked", done);
-      resolve();
-    };
-    v.addEventListener("seeked", done);
-    window.setTimeout(done, 350);
-    try {
-      v.currentTime = 0;
-    } catch {
-      done();
-    }
-  });
-}
-
-async function drawSegment(
-  ctx: CanvasRenderingContext2D,
-  canvas: HTMLCanvasElement,
-  video: HTMLVideoElement,
-  povText: string,
-) {
-  await seekStart(video);
-  await video.play().catch(() => {});
-  const started = performance.now();
-  await new Promise<void>((resolve) => {
-    const draw = () => {
-      const elapsed = performance.now() - started;
-      ctx.fillStyle = "#000";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      drawCover(ctx, video, canvas.width, canvas.height);
-      drawPovText(ctx, povText, canvas.width, canvas.height);
-      if (elapsed >= SLIDE_MS) {
-        video.pause();
-        resolve();
-      } else {
-        requestAnimationFrame(draw);
-      }
-    };
-    draw();
-  });
-}
-
-async function renderFilmInBrowser(
-  clips: Blob[],
-  povText: string,
-  musicUrl: string,
-): Promise<{ blob: Blob; ext: "mp4" | "webm" }> {
-  const choice = pickRecorder();
-  if (!choice) throw new Error("No browser video recorder");
-
-  const canvas = document.createElement("canvas");
-  canvas.width = 720;
-  canvas.height = 1280;
-  const ctx = canvas.getContext("2d");
-  const captureStream = canvas.captureStream?.bind(canvas);
-  if (!ctx || !captureStream) throw new Error("No canvas recorder");
-
-  const stream = captureStream(30);
-  let audioCtx: AudioContext | null = null;
-  let audioSrc: AudioBufferSourceNode | null = null;
-  try {
-    audioCtx = new AudioContext();
-    const music = await fetch(musicUrl).then((r) => r.arrayBuffer());
-    const audio = await audioCtx.decodeAudioData(music.slice(0));
-    const dest = audioCtx.createMediaStreamDestination();
-    audioSrc = audioCtx.createBufferSource();
-    audioSrc.buffer = audio;
-    audioSrc.connect(dest);
-    dest.stream.getAudioTracks().forEach((track) => stream.addTrack(track));
-    await audioCtx.resume().catch(() => {});
-  } catch {
-    audioCtx?.close().catch(() => {});
-    audioCtx = null;
-    audioSrc = null;
-  }
-
-  const tempUrls: string[] = [];
-  const videos = await Promise.all(clips.map((clip) => loadVideoForRender(clip, tempUrls)));
-  const chunks: Blob[] = [];
-  const recorder = new MediaRecorder(stream, {
-    mimeType: choice.mimeType,
-    videoBitsPerSecond: 4_000_000,
-    audioBitsPerSecond: 128_000,
-  });
-  const done = new Promise<Blob>((resolve, reject) => {
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunks.push(e.data);
-    };
-    recorder.onerror = () => reject(new Error("Browser recording failed"));
-    recorder.onstop = () => resolve(new Blob(chunks, { type: choice.fileType }));
-  });
-
-  recorder.start(250);
-  try {
-    audioSrc?.start();
-  } catch {
-    audioSrc = null;
-  }
-  let renderError: unknown = null;
-  try {
-    for (const video of videos) {
-      await drawSegment(ctx, canvas, video, povText);
-    }
-  } catch (err) {
-    renderError = err;
-  } finally {
-    try {
-      audioSrc?.stop();
-    } catch {}
-    videos.forEach((video) => video.pause());
-    stream.getTracks().forEach((track) => track.stop());
-    tempUrls.forEach((url) => URL.revokeObjectURL(url));
-    audioCtx?.close().catch(() => {});
-    if (recorder.state !== "inactive") recorder.stop();
-  }
-  const blob = await done;
-  if (renderError) throw renderError;
-  return { blob, ext: choice.ext };
 }
 
 const POV_PREFIX = "POV: Growing up in";
@@ -865,7 +703,6 @@ export default function Home() {
     sessionId: string,
     indices: number[],
     povImage: string,
-    povText: string,
   ): Promise<boolean> {
     const clips = indices.map((index) => clipBlobsRef.current[index]);
     if (clips.some((clip) => !clip)) return false;
@@ -919,27 +756,22 @@ export default function Home() {
           }),
         });
       }
-      const sd = await sr.json().catch(() => ({}));
-      if (!sr.ok) throw new Error(sd.error || "Stitch failed");
-      const blob = await fetch(sd.videoUrl).then((r) => {
-        if (!r.ok) throw new Error("Rendered film missing");
-        return r.blob();
-      });
+      if (!sr.ok) {
+        const sd = await sr.json().catch(() => ({}));
+        throw new Error(sd.error || "Stitch failed");
+      }
+      // The stitch route streams the finished mp4 back in its own response —
+      // no follow-up GET to /api/video (which could hit a cold instance with
+      // an empty tmp and 404).
+      const blob = await sr.blob();
+      if (blob.size < 1000) throw new Error("Rendered film empty");
       if (runRef.current !== run) return false;
       setFinalShareBlob(blob, "mp4");
       return true;
-    } catch {}
-
-    try {
-      const rendered = await renderFilmInBrowser(
-        readyClips,
-        povText,
-        `/api/music?session=${encodeURIComponent(sessionId)}`,
-      );
-      if (runRef.current !== run) return false;
-      setFinalShareBlob(rendered.blob, rendered.ext);
-      return true;
     } catch {
+      // Fail fast and surface it. The old in-browser MediaRecorder fallback
+      // hung indefinitely on iOS (its dynamically created videos never play
+      // in Low Power Mode), which is what made the share appear stuck.
       if (runRef.current === run) setShareFailed(true);
       return false;
     }
@@ -1001,7 +833,7 @@ export default function Home() {
       // not); it usually finishes within the ~14s pass, so the Share button
       // is lit by the time the sheet pops. renderShareFilm falls back to an
       // in-browser render only if the server stitch can't run.
-      renderShareFilm(run, sessionId, ok, povImage, povText);
+      renderShareFilm(run, sessionId, ok, povImage);
     } catch (err: any) {
       if (runRef.current === run) setError(err?.message ?? "Something went wrong");
     }

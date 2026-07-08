@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { promises as fs } from "fs";
 import { get, del } from "@vercel/blob";
-import { saveClip, stitchClips, stitchStills, stitchHybrid } from "@/lib/video";
+import { saveClip, stitchClips, stitchStills, stitchHybrid, finalPath } from "@/lib/video";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -44,7 +45,18 @@ export async function POST(req: Request) {
     if (clipUrls.length > 0) {
       del(clipUrls.map((c) => c.url)).catch(() => {});
     }
-    return NextResponse.json({ videoUrl: `/api/video?session=${encodeURIComponent(sessionId)}` });
+    // Return the finished film's bytes directly. Reading it back here — on the
+    // same instance that just wrote it — sidesteps serverless tmp not being
+    // shared across instances (a follow-up GET to /api/video could hit a cold
+    // container with an empty tmp and 404, which used to strand the share).
+    const mp4 = await fs.readFile(finalPath(sessionId));
+    return new Response(new Uint8Array(mp4), {
+      headers: {
+        "Content-Type": "video/mp4",
+        "Content-Length": String(mp4.length),
+        "Cache-Control": "no-store",
+      },
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message ?? "Stitch failed" }, { status: 500 });
   }
