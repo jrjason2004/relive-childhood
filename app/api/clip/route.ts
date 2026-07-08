@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateImage } from "@/lib/gemini";
+import { generateImage, pickBestRef } from "@/lib/gemini";
 import { generateVideoClip } from "@/lib/wan";
 import { fetchReferenceImages } from "@/lib/refimages";
 import { saveClip } from "@/lib/video";
@@ -16,7 +16,7 @@ export const maxDuration = 600;
 // still server-side first.
 export async function POST(req: Request) {
   try {
-    const { sessionId, index, imagePrompt, videoPrompt, referenceQuery, image } =
+    const { sessionId, index, imagePrompt, videoPrompt, referenceQuery, skinTone, fallbackScene, image } =
       await req.json();
     if (!sessionId || typeof index !== "number" || !videoPrompt) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -29,15 +29,20 @@ export async function POST(req: Request) {
       if (!imagePrompt) {
         return NextResponse.json({ error: "image or imagePrompt required" }, { status: 400 });
       }
-      let refs: Awaited<ReturnType<typeof fetchReferenceImages>> = [];
+      let ref = null;
       if (referenceQuery) {
         try {
-          refs = await fetchReferenceImages(referenceQuery, 3);
+          ref = await pickBestRef(referenceQuery, await fetchReferenceImages(referenceQuery, 6));
         } catch {
-          // proceed without references rather than failing the whole clip
+          // proceed without a reference rather than failing the whole clip
         }
       }
-      still = await generateImage(imagePrompt, refs);
+      still = await generateImage(
+        imagePrompt,
+        typeof skinTone === "string" && skinTone ? skinTone : "medium",
+        ref,
+        typeof fallbackScene === "string" ? fallbackScene : "",
+      );
     }
 
     const clip = await generateVideoClip(still, videoPrompt);

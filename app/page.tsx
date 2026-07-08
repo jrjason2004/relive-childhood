@@ -31,9 +31,10 @@ type Moment = {
 type Profile = { ageYears: number; gender: string; skinTone: string };
 
 type SlideSpec = {
-  imagePrompt: string;
+  imagePrompt: string; // short activity clause
   videoPrompt: string; // only used when USE_WAN
   referenceQuery?: string;
+  fallbackScene?: string; // place + era, used only when no photo is found
   mode?: "generated" | "real"; // real = archival-photo keepsake slide
 };
 
@@ -601,6 +602,8 @@ export default function Home() {
                 index: i,
                 imagePrompt: spec.imagePrompt,
                 referenceQuery: spec.referenceQuery,
+                fallbackScene: spec.fallbackScene,
+                skinTone: profile?.skinTone ?? "medium",
                 mode: spec.mode ?? "generated",
               },
         ),
@@ -841,11 +844,15 @@ export default function Home() {
       const queue = moments.slice(0, 7);
       setTotal(queue.length);
 
+      const childYear = new Date().getFullYear() - prof.ageYears + CHILD_AGE;
+      const cityShort = cityName.split(",")[0].trim();
       const tasks = queue.map((m, j) => () =>
         buildSlide(run, sessionId, j, {
           imagePrompt: m.imagePrompt,
           videoPrompt: m.videoPrompt,
           referenceQuery: m.referenceQuery,
+          // only used if no real photo is found — names the place + era
+          fallbackScene: `${m.title}, ${cityShort} in ${childYear}`,
           mode: "generated" as const,
         }),
       );

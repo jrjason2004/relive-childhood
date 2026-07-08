@@ -9,9 +9,9 @@ const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 export type Moment = {
   title: string;
   description: string; // why it's nostalgic for this place + era
-  imagePrompt: string; // vivid scene prompt for Nano Banana 2
+  imagePrompt: string; // short activity clause: "holding an iPhone 6 running Pokémon Go"
   videoPrompt: string; // subtle-motion + ambient-audio prompt for Veo 3.1
-  referenceQuery: string; // SerpAPI Google Images query for the real landmark/object
+  referenceQuery: string; // Google Images query for the real landmark/object
   kind: "place" | "generic"; // place = named real location with findable archival photos
 };
 
@@ -116,7 +116,7 @@ CRITICAL — era accuracy for real places. This person will instantly notice an 
 For each of the 7, return:
 - "title": short punchy name
 - "description": 1-2 sentences on the specific childhood activity and why doing it at this local place was nostalgic for this place + era
-- "imagePrompt": a SIMPLE, true first-person POV photo from the eyes of a YOUNG CHILD, around 7 years old, actively doing the nostalgic activity at the verified ${city} anchor. The vantage point is LOW — at a small child's height — looking out and slightly up at the moment: the child's small hands (${skinTone} skin tone) should naturally hold or reach for the era-specific prop, snack, ticket, toy, game, bike handlebar, tray, wristband, or other activity object. Other young children the same age, taller grown-ups, and the real place must surround the action. The location anchor must be VISIBLE in the frame (the actual signage, storefront, landmark, scoreboard, counter, entrance, ride, court, pool, or unmistakable local setting — name it in the prompt). The viewer is a little kid participating in a memory, not staring at a building or isolated object. Do not show the viewer's face. State explicitly that the scene is set in ${childhoodSpan} so every detail (signage, cars, clothes, devices, toys, games, food packaging) matches those years. Warm nostalgic film look, era-accurate details, 9:16 vertical.
+- "imagePrompt": a SHORT clause (about 6-14 words) naming ONLY what the child is doing with the era-specific object — the nostalgic ACTION, not the place. It will be dropped into the sentence "A first-person POV photo from a 7-year-old child's low perspective, <imagePrompt>. In the attached scene." so it must read naturally there and start with a verb like holding/gripping/clutching/carrying/reaching for/trading/eating/steering. Name the specific era-correct object from ${childhoodSpan} (e.g. "holding an iPhone 6 running Pokémon Go", "gripping a fistful of arcade tokens", "carrying a melting Superman ice cream bar", "clutching a paper movie ticket for Men in Black"). Do NOT describe the location, camera, lighting, other people, or the era in words — the attached reference photo supplies the place.
 - "videoPrompt": how this still comes alive as a 4-second clip — subtle, realistic motion from the low child's-eye view while the kid continues the nostalgic activity: hands move, friends shift, an arcade screen flickers, a snack drips, tickets flutter, a ball rolls, a bike coasts, or the child gently walks forward. Keep the verified local anchor visible. No scene cuts.
 - "referenceQuery": the best Google Images search query to retrieve REAL PHOTOGRAPHS (not maps, logos, or graphics) of the specific landmark/object/place named. Be specific and include the city. If the place still exists but has been rebuilt or renovated since ${childhoodSpan}, bias the query toward how it looked then (e.g. add the decade, "vintage", "old", or "historic") so the results are period-accurate rather than the modern version.
 - "kind": "place" for every object. All 7 moments must center on a NAMED real local location, event venue, park, store, arcade, restaurant, mall, pool, street, neighborhood, team venue, or landmark whose real archival photos would be findable on Google Images.
@@ -178,15 +178,16 @@ function parseMoments(text: string): Moment[] {
   }
 }
 
-// Keep only reference candidates that actually depict the queried subject.
-// The scrapers sometimes "succeed" with completely unrelated tiles (a Bing
-// query for an Ashburn storefront once returned castles and maps of
-// Slovakia); Nano Banana composites whatever it's handed, so junk refs
-// poison the scene. One cheap flash-vision call filters them. On any doubt
-// or failure this returns fewer/zero refs — a prompt-only scene always beats
-// a garbage-grounded one.
-export async function filterRelevantRefs(query: string, refs: RefImage[]): Promise<RefImage[]> {
-  if (refs.length === 0) return refs;
+// Pick the SINGLE clearest real photograph of the queried place, best
+// matching its era. The scrapers return a mix of real photos, graphics,
+// maps, and wrong places; Nano Banana treats the attached reference as
+// "the scene", so it gets exactly one, well-chosen photo. Returns null when
+// nothing qualifies (a prompt-only scene beats a garbage-grounded one).
+export async function pickBestRef(
+  query: string,
+  refs: RefImage[],
+): Promise<RefImage | null> {
+  if (refs.length === 0) return null;
   const model = process.env.GEMINI_VISION_MODEL || "gemini-2.5-flash";
   const parts: any[] = [];
   refs.forEach((r, i) => {
@@ -195,10 +196,9 @@ export async function filterRelevantRefs(query: string, refs: RefImage[]): Promi
   });
   parts.push({
     text: `These images came from an image search for: "${query}".
-Keep ONLY images that are REAL CAMERA PHOTOGRAPHS of that actual subject (the real place, object, or scene — archival or modern, both fine).
-REJECT anything that is not a real photograph, including: illustrations, drawings, cartoons, clipart, 3D renderings, architectural mockups or CGI, floor plans, blueprints, maps, diagrams, charts, infographics, logos, icons, emoji, posters, movie/album art, product boxes or packaging, text-heavy graphics, and website or app screenshots. Also reject real photographs of a DIFFERENT place or thing than the subject, and heavily watermarked stock previews.
-When you are not clearly confident an image is a real photograph OF THIS SUBJECT, REJECT it.
-Return ONLY a JSON array of the qualifying image numbers, e.g. [1,3]. If none qualify, return [].`,
+Pick the SINGLE best image to use as a real photographic backdrop of that place, in the time period named in the query.
+It MUST be a real camera photograph of that actual place. Never pick an illustration, drawing, cartoon, 3D rendering, floor plan, map, diagram, chart, logo, icon, poster, product packaging, text graphic, screenshot, a watermarked stock preview, or a photo of a different place. Prefer the clearest, most representative shot from the right era.
+Reply with ONLY the single best image's number (e.g. 3). If NONE is a usable real photograph of the place, reply with 0.`,
   });
   try {
     const res = await fetch(`${API_ROOT}/${model}:generateContent?key=${key()}`, {
@@ -210,55 +210,50 @@ Return ONLY a JSON array of the qualifying image numbers, e.g. [1,3]. If none qu
       }),
       cache: "no-store",
     });
-    if (!res.ok) throw new Error(`Gemini ref filter ${res.status}`);
+    if (!res.ok) throw new Error(`Gemini ref pick ${res.status}`);
     const json = await res.json();
     const text: string =
       json?.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") ?? "";
-    // The reply can be chatty — take the LAST bracketed array, which is the
-    // verdict ("...here's why... Therefore: [1,3]").
-    const arrays = [...text.matchAll(/\[[\d,\s]*\]/g)];
-    if (arrays.length === 0) throw new Error("no JSON array in ref filter reply");
-    const picked = (JSON.parse(arrays[arrays.length - 1][0]) as unknown[])
-      .map(Number)
-      .filter((n) => Number.isInteger(n) && n >= 1 && n <= refs.length);
-    const kept = refs.filter((_, i) => picked.includes(i + 1));
-    console.info("[gemini:reffilter]", {
+    // Take the last integer in the reply — the verdict, even if it's chatty.
+    const nums = [...text.matchAll(/\d+/g)].map((m) => Number(m[0]));
+    const choice = nums.length ? nums[nums.length - 1] : 0;
+    const picked = choice >= 1 && choice <= refs.length ? refs[choice - 1] : null;
+    console.info("[gemini:refpick]", {
       query: query.length > 100 ? `${query.slice(0, 97)}...` : query,
       candidates: refs.length,
-      kept: kept.length,
+      picked: picked ? choice : "none",
     });
-    return kept;
+    return picked;
   } catch (err) {
-    console.warn("[gemini:reffilter] failed — generating ungrounded", {
+    console.warn("[gemini:refpick] failed — generating ungrounded", {
       error: err instanceof Error ? err.message : "unknown",
     });
-    return [];
+    return null;
   }
 }
 
+// One dead-simple prompt: the child + the era-specific action, with a single
+// real photo of the place attached as "the scene". When no photo qualifies,
+// name the place inline instead so the scene still has a setting.
 export async function generateImage(
-  imagePrompt: string,
-  refs: RefImage[],
+  activity: string,
+  skinTone: string,
+  ref: RefImage | null,
+  fallbackScene = "",
 ): Promise<{ mimeType: string; data: string }> {
   const model = process.env.GEMINI_IMAGE_MODEL || "gemini-3-pro-image";
 
-  const fullPrompt = `${imagePrompt}
-
-True first-person POV from the eyes of a YOUNG CHILD around 7 years old: a LOW, small-child vantage looking out and slightly up at the scene, other young kids the same age, and grown-ups who tower above. The child must be actively doing the nostalgic activity named in the prompt at the real local place: small hands should naturally hold, reach for, carry, trade, play with, eat, steer, or touch the era-specific prop, snack, ticket, toy, game, bike, tray, wristband, or object that makes the memory feel lived-in. Do not make a static landmark or storefront shot. Keep the verified local anchor visible in the surroundings while the childhood action remains clear. Do not show the viewer's face.
-
-REFERENCE PHOTOS — IDENTITY, NOT ERA. Use the attached reference photos ONLY to recognize the real place's identity, architecture, layout, and brand look. They were most likely shot in the present day, so DO NOT copy modern details from them: ignore any present-day or renovated signage, current logos/branding, LED or digital screens, flat-panel TVs, modern cars, smartphones, and recent remodels. Render the place authentically as it looked in the exact year/era stated above — period-correct signage, storefront and interior design, materials, lighting, vehicles, clothing, and technology of that time. Era accuracy overrides the references wherever they conflict.
-
-Warm nostalgic photographic 9:16 vertical. No text or watermarks.`;
+  const child = `a 7-year-old ${skinTone}-skinned child's low perspective`;
+  const fullPrompt = ref
+    ? `A first-person POV photo from ${child}, ${activity}. In the attached scene.`
+    : `A first-person POV photo from ${child}, ${activity}${fallbackScene ? `, at ${fallbackScene}` : ""}.`;
 
   const parts: any[] = [{ text: fullPrompt }];
-  for (const r of refs) {
-    parts.push({ inlineData: { mimeType: r.mimeType, data: r.data } });
-  }
+  if (ref) parts.push({ inlineData: { mimeType: ref.mimeType, data: ref.data } });
   console.info("[gemini:image] request", {
     model,
-    refCount: refs.length,
-    inlineImageParts: parts.filter((p) => p.inlineData).length,
-    mimeTypes: refs.map((r) => r.mimeType),
+    grounded: Boolean(ref),
+    prompt: fullPrompt,
   });
 
   const body = {

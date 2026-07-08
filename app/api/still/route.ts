@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
-import { generateImage, filterRelevantRefs } from "@/lib/gemini";
+import { generateImage, pickBestRef } from "@/lib/gemini";
 import { fetchReferenceImages, type RefImage } from "@/lib/refimages";
 import { saveStill, composeRealSlide, stillPath } from "@/lib/video";
 
@@ -11,38 +11,34 @@ export const maxDuration = 120;
 // serverless, the instance that generated it may not serve the next GET, so
 // the client must get the bytes here) and also saved to the session dir as
 // best effort for local/legacy paths.
-// mode "generated": real refs guide a Nano Banana 2 POV still.
-// mode "real": the best real archival photo becomes a full-screen slide
-//              (falls back to "generated" when no usable photo is found).
+// The client sends a short activity clause (imagePrompt), the reference
+// query, the child's skin tone, and a fallback scene phrase. We pick the
+// single best real photo of the place and hand Nano Banana a one-line POV
+// prompt with that photo as "the attached scene".
 export async function POST(req: Request) {
   try {
-    const { sessionId, index, imagePrompt, referenceQuery, mode } = await req.json();
+    const { sessionId, index, imagePrompt, referenceQuery, skinTone, fallbackScene, mode } =
+      await req.json();
     if (!sessionId || typeof index !== "number" || !imagePrompt) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    let refs: RefImage[] = [];
+    let ref: RefImage | null = null;
     if (referenceQuery) {
       try {
-        // Fetch a wider batch, then keep only candidates a vision check
-        // confirms actually depict the queried subject — scrapers sometimes
-        // return confident garbage (unrelated clipart, maps, wrong places),
-        // and junk refs poison the generated scene. Zero refs beats bad refs.
+        // Fetch a batch, then let a vision check pick the ONE clearest real
+        // photo of the place from the right era — scrapers return a mix of
+        // photos, graphics, maps, and wrong places. Null beats a bad ref.
         const candidates = await fetchReferenceImages(referenceQuery, 6);
-        refs = (await filterRelevantRefs(referenceQuery, candidates)).slice(
-          0,
-          mode === "real" ? 6 : 3,
-        );
+        ref = await pickBestRef(referenceQuery, candidates);
       } catch {
-        // proceed without references rather than failing the whole still
+        // proceed without a reference rather than failing the whole still
       }
     }
 
-    if (mode === "real" && refs.length > 0) {
-      // Largest photo is the best print candidate (byte size ~ resolution).
-      const best = [...refs].sort((a, b) => b.data.length - a.data.length)[0];
+    if (mode === "real" && ref) {
       try {
-        await composeRealSlide(sessionId, index, Buffer.from(best.data, "base64"));
+        await composeRealSlide(sessionId, index, Buffer.from(ref.data, "base64"));
         const buf = await fs.readFile(stillPath(sessionId, index));
         return imageResponse(new Uint8Array(buf), "image/jpeg");
       } catch {
@@ -50,12 +46,14 @@ export async function POST(req: Request) {
       }
     }
 
+    const tone = typeof skinTone === "string" && skinTone ? skinTone : "medium";
+    const scene = typeof fallbackScene === "string" ? fallbackScene : "";
     // One retry: a missing still would shift every later storyboard scene.
     let still: Awaited<ReturnType<typeof generateImage>> | null = null;
     let lastErr: unknown = null;
     for (let attempt = 0; attempt < 2 && !still; attempt++) {
       try {
-        still = await generateImage(imagePrompt, refs.slice(0, 3));
+        still = await generateImage(imagePrompt, tone, ref, scene);
       } catch (err) {
         lastErr = err;
       }
@@ -64,8 +62,8 @@ export async function POST(req: Request) {
     const bytes = Buffer.from(still.data, "base64");
     await saveStill(sessionId, index, bytes).catch(() => {});
     const res = imageResponse(new Uint8Array(bytes), still.mimeType || "image/jpeg");
-    // how many real reference photos grounded this still (0 = ungrounded)
-    res.headers.set("x-ref-count", String(refs.length));
+    // 1 = a real photo grounded the scene, 0 = generated from the prompt only
+    res.headers.set("x-ref-count", ref ? "1" : "0");
     return res;
   } catch (err: any) {
     return NextResponse.json({ error: err?.message ?? "Still generation failed" }, { status: 500 });

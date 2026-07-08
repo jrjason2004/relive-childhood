@@ -11,7 +11,7 @@
 //   5. Bing Images HTML scrape (keyless last resort; returns unrelated
 //      anti-bot tiles to server fetches, so the vision filter must vet it)
 // Every provider throws or returns []; callers already treat an empty list
-// as "generate ungrounded". Candidates are vetted by filterRelevantRefs
+// as "generate ungrounded". Candidates are vetted by pickBestRef
 // (lib/gemini.ts) before they can ground a scene.
 
 export type RefImage = { mimeType: string; data: string }; // data = base64
