@@ -1306,37 +1306,18 @@ export default function Home() {
                 overflow: "hidden",
               }}
             >
-              {/* Full-width 4:5 window instead of full-bleed: covering the
-                  whole ~1:2 phone frame with a 16:9 webcam kept only ~28% of
-                  its horizontal field of view — a face filled the screen.
-                  This window shows ~1.6x more; the vignette below blends its
-                  edges into the backdrop. Centered on 40% to align with the
-                  scan reticle. */}
-              <div
-                style={{
-                  position: "absolute",
-                  top: "40%",
-                  left: 0,
-                  right: 0,
-                  transform: "translateY(-50%)",
-                  aspectRatio: "4 / 5",
-                  overflow: "hidden",
-                }}
-              >
-                <video
-                  ref={mirrorRef}
-                  autoPlay
-                  muted
-                  playsInline
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                    transform: "scaleX(-1)",
-                    opacity: 0.94,
-                  }}
-                />
-              </div>
+              {/* Full-screen mirror. On mobile the front camera delivers a
+                  portrait stream, so cover-filling the tall frame barely
+                  crops — it fills the screen without the zoom. (The zoom bug
+                  was the forced 9/16 aspectRatio constraint cropping the
+                  sensor at the source; that's gone from getUserMedia.) */}
+              <video
+                ref={mirrorRef}
+                autoPlay
+                muted
+                playsInline
+                style={{ ...FULL_BLEED, transform: "scaleX(-1)", opacity: 0.94 }}
+              />
             </div>
             <div
               style={{
