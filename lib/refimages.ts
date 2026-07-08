@@ -1,14 +1,18 @@
 // Fetch real reference photos for grounding still generation.
 //
-// Provider chain, first one that yields images wins:
-//   1. DuckDuckGo images (keyless, unofficial vqd + i.js endpoints,
-//      Bing-backed index) — the default
-//   2. Bing Images HTML scrape (keyless fallback when DDG is blocked)
-//   3. Google Programmable Search (official, free 100 queries/day) when
-//      GOOGLE_CSE_KEY + GOOGLE_CSE_CX are set
-//   4. SerpAPI (legacy paid Google Images scrape) when SERPAPI_KEY is set
+// Provider chain, first one that yields images wins. Keyed providers lead
+// (real Google Images results, reliable on Vercel); keyless scrapers trail:
+//   1. Serper.dev images (real Google Images, cheap) when SERPER_API_KEY set
+//   2. Google Programmable Search when GOOGLE_CSE_KEY + GOOGLE_CSE_CX set
+//      (note: closed to new customers, sunsets 2027-01-01 — legacy only)
+//   3. SerpAPI when SERPAPI_KEY set
+//   4. DuckDuckGo images (keyless vqd + i.js; works locally, IP-blocked on
+//      Vercel) — the free default when no key is configured
+//   5. Bing Images HTML scrape (keyless last resort; returns unrelated
+//      anti-bot tiles to server fetches, so the vision filter must vet it)
 // Every provider throws or returns []; callers already treat an empty list
-// as "generate ungrounded".
+// as "generate ungrounded". Candidates are vetted by filterRelevantRefs
+// (lib/gemini.ts) before they can ground a scene.
 
 export type RefImage = { mimeType: string; data: string }; // data = base64
 
@@ -16,13 +20,20 @@ const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 
 export async function fetchReferenceImages(query: string, count = 3): Promise<RefImage[]> {
-  const providers: Array<{ name: string; urls: () => Promise<string[]> }> = [
-    { name: "duckduckgo", urls: () => duckDuckGoUrls(query) },
-  ];
+  // Keyed providers lead: they return real Google Images results, so they
+  // win where the free scrapers are unreliable (on Vercel, DuckDuckGo is
+  // IP-blocked and Bing serves an anti-bot page of unrelated tiles). Locally,
+  // whichever keys aren't set are simply skipped and DuckDuckGo — free and
+  // working — leads, so local dev spends no credits.
+  const providers: Array<{ name: string; urls: () => Promise<string[]> }> = [];
+  if (process.env.SERPER_API_KEY) {
+    providers.push({ name: "serper", urls: () => serperImageUrls(query, count) });
+  }
   if (process.env.GOOGLE_CSE_KEY && process.env.GOOGLE_CSE_CX) {
     providers.push({ name: "google_cse", urls: () => googleCseUrls(query, count) });
   }
   if (process.env.SERPAPI_KEY) providers.push({ name: "serpapi", urls: () => serpApiUrls(query) });
+  providers.push({ name: "duckduckgo", urls: () => duckDuckGoUrls(query) });
   // Scraped Bing is the LAST resort: to server-side fetches it serves a
   // degraded anti-bot page whose tiles are unrelated to the query (verified:
   // a Blockbuster query returned beauty-site images; an Ashburn query
@@ -61,6 +72,22 @@ export async function fetchReferenceImages(query: string, count = 3): Promise<Re
   }
   console.warn("[refimages] no_refs", { query: queryPreview(query), requested: count });
   return [];
+}
+
+async function serperImageUrls(query: string, count: number): Promise<string[]> {
+  const res = await fetch("https://google.serper.dev/images", {
+    method: "POST",
+    headers: {
+      "X-API-KEY": process.env.SERPER_API_KEY!,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ q: query, num: Math.min(count * 3, 20) }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`Serper ${res.status}`);
+  const json = (await res.json()) as { images?: { imageUrl?: string }[] };
+  return (json.images ?? []).map((i) => i.imageUrl).filter((u): u is string => Boolean(u));
 }
 
 async function googleCseUrls(query: string, count: number): Promise<string[]> {
