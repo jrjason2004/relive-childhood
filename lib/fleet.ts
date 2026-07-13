@@ -63,13 +63,22 @@ export async function startFleet(): Promise<{ running: number; starting: number 
   if (!c) return { running: 0, starting: 0 };
   const fleet = await describeFleet();
   const stopped = fleet.filter((i) => i.state === "stopped").map((i) => i.id);
-  if (stopped.length > 0) {
-    await c.send(new StartInstancesCommand({ InstanceIds: stopped }));
-    workerCache = null; // running set is about to change
-    console.log("[fleet] starting", stopped);
+  // Start one at a time: g6e capacity is not guaranteed, and a single
+  // InsufficientInstanceCapacity must not mask boxes that CAN start (or the
+  // running count of boxes already up).
+  let starting = 0;
+  for (const id of stopped) {
+    try {
+      await c.send(new StartInstancesCommand({ InstanceIds: [id] }));
+      starting++;
+      workerCache = null; // running set is about to change
+      console.log("[fleet] starting", id);
+    } catch (e) {
+      console.error("[fleet] start failed", id, e);
+    }
   }
   return {
     running: fleet.filter((i) => i.state === "running").length,
-    starting: stopped.length + fleet.filter((i) => i.state === "pending").length,
+    starting: starting + fleet.filter((i) => i.state === "pending").length,
   };
 }
