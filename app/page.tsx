@@ -1931,6 +1931,20 @@ export default function Home() {
               >
                 {curYear}
               </div>
+              <div
+                style={{
+                  marginTop: 14,
+                  fontSize: 11,
+                  fontWeight: 500,
+                  letterSpacing: "0.28em",
+                  textTransform: "uppercase",
+                  color: "rgba(255,255,255,0.45)",
+                  textShadow: "0 0 16px rgba(255,235,205,0.25)",
+                  animation: "rcRetic 2.2s ease-in-out infinite",
+                }}
+              >
+                video loading...
+              </div>
             </div>
           </div>
         )}
