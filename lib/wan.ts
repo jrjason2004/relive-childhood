@@ -9,16 +9,38 @@
 // high_lightning / low_lightning substrings rather than hardcoding them.
 // Same signature as the old lib/ltx.ts: (still + prompt) → mp4 Buffer.
 
-const WORKERS = (process.env.COMFY_URL || "http://localhost:8188")
-  .split(",")
-  .map((u) => u.trim())
-  .filter(Boolean);
+import { listWorkers, startFleet } from "./fleet";
+
+// Worker resolution: an explicit COMFY_URL (comma-separated, e.g. local SSM
+// tunnels) always wins; otherwise workers are discovered live from EC2 by
+// the Fleet=wan tag (public IP + token proxy) so on-demand boots and IP
+// churn need no env changes.
+async function getWorkers(): Promise<string[]> {
+  const fixed = (process.env.COMFY_URL || "")
+    .split(",")
+    .map((u) => u.trim())
+    .filter(Boolean);
+  if (fixed.length > 0) return fixed;
+  const fleet = await listWorkers();
+  return fleet.length > 0 ? fleet : ["http://localhost:8188"];
+}
+
+// Every request goes through the boxes' token-auth proxy when WAN_TOKEN is
+// set (prod); locally through the tunnels the header is just ignored.
+function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const token = process.env.WAN_TOKEN;
+  return token ? { ...extra, "X-Wan-Token": token } : extra;
+}
 
 let nextWorker = 0;
 
 async function queueDepth(url: string): Promise<number> {
   try {
-    const r = await fetch(`${url}/prompt`, { cache: "no-store", signal: AbortSignal.timeout(3000) });
+    const r = await fetch(`${url}/prompt`, {
+      cache: "no-store",
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(3000),
+    });
     if (!r.ok) return Infinity;
     return (await r.json())?.exec_info?.queue_remaining ?? Infinity;
   } catch {
@@ -29,6 +51,7 @@ async function queueDepth(url: string): Promise<number> {
 // Workers ordered emptiest-first; unreachable ones sort last (still attempted
 // as a final fallback). Ties rotate round-robin so parallel clips spread out.
 async function workersByLoad(): Promise<string[]> {
+  const WORKERS = await getWorkers();
   const depths = await Promise.all(WORKERS.map(queueDepth));
   const start = nextWorker++;
   return WORKERS.map((url, i) => ({
@@ -48,7 +71,10 @@ async function discoverLoras(url: string): Promise<{ high: string; low: string }
   let high = "wan22_i2v_high_lightning.safetensors";
   let low = "wan22_i2v_low_lightning.safetensors";
   try {
-    const r = await fetch(`${url}/object_info/LoraLoaderModelOnly`, { cache: "no-store" });
+    const r = await fetch(`${url}/object_info/LoraLoaderModelOnly`, {
+      cache: "no-store",
+      headers: authHeaders(),
+    });
     const names: string[] =
       (await r.json())?.LoraLoaderModelOnly?.input?.required?.lora_name?.[0] ?? [];
     high = names.find((n) => n.includes("high_lightning")) ?? high;
@@ -200,6 +226,18 @@ Maintain the low young-child first-person POV, consistent with the starting fram
 
   // 1. Upload the start frame to the least-busy worker's input dir, with
   //    failover: an unreachable worker (dead tunnel, box down) is skipped.
+  // Cold fleet: boot-on-entry may still be bringing the boxes up (instance
+  // start + ComfyUI ≈ 2-4 min). Kick the fleet and wait for a reachable
+  // worker before giving up, instead of failing the whole scene.
+  const bootDeadline = Date.now() + 4 * 60 * 1000;
+  while (Date.now() < bootDeadline) {
+    const ws = await getWorkers();
+    const depths = await Promise.all(ws.map(queueDepth));
+    if (depths.some((d) => Number.isFinite(d))) break;
+    await startFleet().catch(() => {});
+    await sleep(10_000);
+  }
+
   const ext = image.mimeType.includes("jpeg") ? "jpg" : "png";
   const filename = `relive_start_${Date.now()}_${Math.floor(seedFrom(image.data))}.${ext}`;
   let COMFY = "";
@@ -211,14 +249,18 @@ Maintain the low young-child first-person POV, consistent with the starting fram
     up.set("image", new Blob([Buffer.from(image.data, "base64")], { type: image.mimeType }), filename);
     up.set("overwrite", "true");
     try {
-      upRes = await fetch(`${COMFY}/upload/image`, { method: "POST", body: up });
+      upRes = await fetch(`${COMFY}/upload/image`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: up,
+      });
       break;
     } catch (e) {
       lastErr = e;
       upRes = null;
     }
   }
-  if (!upRes) throw new Error(`All ${WORKERS.length} Wan workers unreachable: ${lastErr}`);
+  if (!upRes) throw new Error(`All Wan workers unreachable: ${lastErr}`);
   if (!upRes.ok) throw new Error(`Comfy upload ${upRes.status}: ${await upRes.text()}`);
   const uploaded = await upRes.json();
   const imageName = uploaded.subfolder ? `${uploaded.subfolder}/${uploaded.name}` : uploaded.name;
@@ -229,7 +271,7 @@ Maintain the low young-child first-person POV, consistent with the starting fram
   const workflow = buildWorkflow({ prompt: fullPrompt, imageName, seed, loras });
   const queue = await fetch(`${COMFY}/prompt`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ prompt: workflow }),
   });
   if (!queue.ok) throw new Error(`Comfy queue ${queue.status}: ${await queue.text()}`);
@@ -241,7 +283,10 @@ Maintain the low young-child first-person POV, consistent with the starting fram
   const deadline = Date.now() + 20 * 60 * 1000;
   while (Date.now() < deadline) {
     await sleep(5000);
-    const hRes = await fetch(`${COMFY}/history/${promptId}`, { cache: "no-store" });
+    const hRes = await fetch(`${COMFY}/history/${promptId}`, {
+      cache: "no-store",
+      headers: authHeaders(),
+    });
     if (!hRes.ok) continue;
     const hist = await hRes.json();
     const entry = hist[promptId];
@@ -251,7 +296,7 @@ Maintain the low young-child first-person POV, consistent with the starting fram
     const out = findVideoOutput(entry.outputs);
     if (out) {
       const q = new URLSearchParams({ filename: out.filename, subfolder: out.subfolder || "", type: out.type || "output" });
-      const dl = await fetch(`${COMFY}/view?${q}`, { cache: "no-store" });
+      const dl = await fetch(`${COMFY}/view?${q}`, { cache: "no-store", headers: authHeaders() });
       if (!dl.ok) throw new Error(`Comfy view ${dl.status}`);
       return Buffer.from(await dl.arrayBuffer());
     }

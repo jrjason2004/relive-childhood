@@ -296,6 +296,9 @@ export default function Home() {
     if (viewTracked) return;
     viewTracked = true;
     track("increment_project_views");
+    // Boot the on-demand GPU fleet the moment someone lands, so the boxes
+    // (auto-stopped when idle) are warm before clips are ever requested.
+    fetch("/api/warm", { method: "POST", keepalive: true }).catch(() => {});
   }, []);
 
   // ================= camera + scan =================
@@ -607,6 +610,10 @@ export default function Home() {
     if (!city.trim() || !profile || !sessionRef.current) return;
     const run = runRef.current;
     const sessionId = sessionRef.current;
+
+    // Safety-net fleet kick: if the page-load warm didn't land (or the boxes
+    // idled out since), start them again before the clip requests go out.
+    fetch("/api/warm", { method: "POST", keepalive: true }).catch(() => {});
 
     // The session's track starts here, inside the tap gesture, and plays
     // continuously through travel and the film.
